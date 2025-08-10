@@ -33,6 +33,70 @@ This project provides a containerized development environment that includes:
    bin/extract-changes
    ```
 
+## Commands
+
+### bin/run
+```bash
+bin/run [--help|--reset] [command]
+```
+
+Run or attach to the ai_agent container with discourse user in `/var/www/discourse`
+
+**Options:**
+- `--help` - Show help message
+- `--reset` - Stop and remove existing container before starting fresh
+
+**Examples:**
+```bash
+bin/run                    # Start interactive bash session
+bin/run rails console      # Run rails console  
+bin/run --reset           # Reset container and start bash session
+bin/run --reset rails s   # Reset container and start rails server
+```
+
+### bin/stop
+```bash
+bin/stop [--help]
+```
+
+Stop the ai_agent container
+
+**Examples:**
+```bash
+bin/stop         # Stop the container
+bin/stop --help  # Show help
+```
+
+### bin/cleanup
+```bash
+bin/cleanup [--help] [--all]
+```
+
+Clean up ai_agent container and optionally the image
+
+**Options:**
+- `--all` - Also remove the Docker image after removing container
+
+**Examples:**
+```bash
+bin/cleanup         # Stop and remove container only
+bin/cleanup --all   # Stop and remove container and image
+```
+
+### bin/build
+```bash
+bin/build [docker-build-options]
+```
+
+Build the ai_agent Docker image
+
+### bin/extract-changes
+```bash
+bin/extract-changes
+```
+
+Extract changes from container to local discourse/ directory
+
 ## Usage
 
 ### Building the Container
@@ -47,17 +111,7 @@ The build script supports all standard Docker build options, such as:
 
 ### Running the Container
 
-```bash
-bin/run [command]
-```
-
-- Without arguments: Opens an interactive bash shell as the `discourse` user
-- With command: Executes the specified command in the container
-
-The container automatically:
-- Mounts the current directory to `/workspace` inside the container
-- Starts in detached mode if not already running
-- Connects to existing container if already running
+The container automatically starts in `/var/www/discourse` directory as the `discourse` user. See the Commands section above for detailed usage.
 
 ### Extracting Changes
 
@@ -88,7 +142,15 @@ git commit -m "Your commit message"
 
 ### Environment Variables
 
-- `CURSOR_API_KEY` - Automatically passed to the container if set on the host
+The following environment variables are automatically passed to the container if set on the host:
+
+- `CURSOR_API_KEY` - For Cursor AI editor integration
+- `ANTHROPIC_API_KEY` - For Anthropic Claude API access
+- `OPENAI_API_KEY` - For OpenAI API access
+- `AWS_ACCESS_KEY_ID` - For AWS services access
+- `AWS_SECRET_ACCESS_KEY` - For AWS services access
+- `CLAUDE_CODE_USE_BEDROCK` - Configure Claude Code to use AWS Bedrock
+- `DEEPSEEK_API_KEY` - For DeepSeek API access
 
 ## Container Details
 
@@ -107,7 +169,9 @@ The container is based on `discourse/discourse_dev:release` and includes:
 ├── Dockerfile          # Container definition
 ├── bin/
 │   ├── build          # Build script
-│   ├── run            # Run script
+│   ├── run            # Run script  
+│   ├── stop           # Stop container
+│   ├── cleanup        # Clean up container/image
 │   └── extract-changes # Extract changes from container
 ├── discourse/          # Local discourse repo (created by extract-changes)
 ├── .gitignore         # Ignores discourse/ directory

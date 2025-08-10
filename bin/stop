@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Stop the ai_agent container
+# Usage: bin/stop [--help]
+
+CONTAINER_NAME="ai_agent"
+
+show_help() {
+  cat << EOF
+Usage: bin/stop [OPTIONS]
+
+Stop the ai_agent container
+
+OPTIONS:
+  --help    Show this help message
+
+Examples:
+  bin/stop         # Stop the container
+  bin/stop --help  # Show this help
+EOF
+}
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+  esac
+done
+
+container_exists() {
+  [[ -n "$(docker ps -aq -f name="^${CONTAINER_NAME}$")" ]]
+}
+
+container_running() {
+  [[ -n "$(docker ps -q -f status=running -f name="^${CONTAINER_NAME}$")" ]]
+}
+
+if ! container_exists; then
+  echo "Container '$CONTAINER_NAME' does not exist"
+  exit 0
+elif ! container_running; then
+  echo "Container '$CONTAINER_NAME' is already stopped"
+  exit 0
+else
+  echo "Stopping container '$CONTAINER_NAME'..."
+  docker stop "$CONTAINER_NAME" >/dev/null
+  echo "Container stopped"
+fi

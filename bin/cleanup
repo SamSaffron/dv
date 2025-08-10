@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Clean up ai_agent container and image
+# Usage: bin/cleanup [--help] [--all]
+
+CONTAINER_NAME="ai_agent"
+IMAGE_TAG="ai_agent"
+
+show_help() {
+  cat << EOF
+Usage: bin/cleanup [OPTIONS]
+
+Clean up ai_agent container and optionally the image
+
+OPTIONS:
+  --help    Show this help message
+  --all     Also remove the Docker image after removing container
+
+Examples:
+  bin/cleanup         # Stop and remove container only
+  bin/cleanup --all   # Stop and remove container and image
+  bin/cleanup --help  # Show this help
+EOF
+}
+
+# Parse options
+REMOVE_IMAGE=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    --all)
+      REMOVE_IMAGE=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+  esac
+done
+
+container_exists() {
+  [[ -n "$(docker ps -aq -f name="^${CONTAINER_NAME}$")" ]]
+}
+
+image_exists() {
+  [[ -n "$(docker images -q "$IMAGE_TAG")" ]]
+}
+
+# Stop and remove container
+if container_exists; then
+  echo "Stopping and removing container '$CONTAINER_NAME'..."
+  docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  echo "Container removed"
+else
+  echo "Container '$CONTAINER_NAME' does not exist"
+fi
+
+# Remove image if requested
+if [[ "$REMOVE_IMAGE" == "true" ]]; then
+  if image_exists; then
+    echo "Removing image '$IMAGE_TAG'..."
+    docker rmi "$IMAGE_TAG" >/dev/null 2>&1 || true
+    echo "Image removed"
+  else
+    echo "Image '$IMAGE_TAG' does not exist"
+  fi
+fi
+
+echo "Cleanup complete"

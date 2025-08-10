@@ -5,15 +5,61 @@ set -euo pipefail
 # Behavior:
 # 1) If the container is not running, boot it with -d (detached)
 # 2) Then docker exec -it into it as user discourse
-# Usage: bin/run [command]
+# Usage: bin/run [--help|--reset] [command]
 
 IMAGE_TAG="ai_agent"
 CONTAINER_NAME="ai_agent"
 
-# Default working dir inside container (optional; adjust as needed)
-WORKDIR="/workspace"
+# Default working dir inside container
+WORKDIR="/var/www/discourse"
 
-HOST_PWD="$(pwd)"
+show_help() {
+  cat << EOF
+Usage: bin/run [OPTIONS] [COMMAND]
+
+Run or attach to the ai_agent container with discourse user in /var/www/discourse
+
+OPTIONS:
+  --help    Show this help message
+  --reset   Stop and remove existing container before starting fresh
+
+COMMAND:
+  If provided, execute this command in the container
+  If no command provided, start an interactive bash session
+
+Examples:
+  bin/run                    # Start interactive bash session
+  bin/run bin/rails c       # Run rails console
+  bin/run --reset           # Reset container and start bash session
+
+Environment Variables:
+  CURSOR_API_KEY      If set, passed through to container
+  ANTHROPIC_API_KEY   If set, passed through to container
+  OPENAI_API_KEY      If set, passed through to container
+  AWS_ACCESS_KEY_ID   If set, passed through to container
+  AWS_SECRET_ACCESS_KEY If set, passed through to container
+  CLAUDE_CODE_USE_BEDROCK If set, passed through to container
+  DEEPSEEK_API_KEY    If set, passed through to container
+EOF
+}
+
+# Parse options
+RESET=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    --reset)
+      RESET=true
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 container_exists() {
   [[ -n "$(docker ps -aq -f name="^${CONTAINER_NAME}$")" ]]
@@ -23,11 +69,19 @@ container_running() {
   [[ -n "$(docker ps -q -f status=running -f name="^${CONTAINER_NAME}$")" ]]
 }
 
+# Handle reset option
+if [[ "$RESET" == "true" ]]; then
+  if container_exists; then
+    echo "Stopping and removing existing container '$CONTAINER_NAME'..."
+    docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  fi
+fi
+
 if ! container_exists; then
   echo "Creating and starting container '$CONTAINER_NAME' in detached mode..."
   docker run -d \
     --name "$CONTAINER_NAME" \
-    -v "$HOST_PWD":"$WORKDIR" \
     -w "$WORKDIR" \
     "$IMAGE_TAG" \
     -lc "sleep infinity"
@@ -38,9 +92,23 @@ fi
 
 # Exec into the running container as user discourse
 EXEC_ENV_ARGS=()
-if [[ -n "${CURSOR_API_KEY:-}" ]]; then
-  EXEC_ENV_ARGS+=(-e CURSOR_API_KEY)
-fi
+
+# Pass through environment variables if they exist
+ENV_VARS=(
+  "CURSOR_API_KEY"
+  "ANTHROPIC_API_KEY"
+  "OPENAI_API_KEY"
+  "AWS_ACCESS_KEY_ID"
+  "AWS_SECRET_ACCESS_KEY"
+  "CLAUDE_CODE_USE_BEDROCK"
+  "DEEPSEEK_API_KEY"
+)
+
+for var in "${ENV_VARS[@]}"; do
+  if [[ -n "${!var:-}" ]]; then
+    EXEC_ENV_ARGS+=(-e "$var")
+  fi
+done
 
 if [[ $# -gt 0 ]]; then
   exec docker exec -it --user discourse -w "$WORKDIR" "${EXEC_ENV_ARGS[@]}" "$CONTAINER_NAME" "$@"
