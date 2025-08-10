@@ -18,6 +18,7 @@ RUN /sbin/boot & \
     sleep 10 && \
     sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rake db:create' && \
     sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rake db:migrate' && \
+    sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && RAILS_ENV=test bin/rake db:migrate' && \
     pkill -f "/sbin/boot" || true
 
 ENTRYPOINT ["/sbin/boot"]
