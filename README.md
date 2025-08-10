@@ -1,13 +1,13 @@
-# Agent Container
+# Discourse AI Agent Container
 
-A Docker-based development environment for AI agents with Discourse integration and Cursor editor support.
+A Docker-based development environment for AI agents with Discourse.
 
 ## Overview
 
 This project provides a containerized development environment that includes:
 - Discourse development setup
 - Essential development tools (vim, ripgrep)
-- Ready-to-use database configuration
+- Ready-to-use database configuration, fully migrated dev/test databases
 - Various AI agents ready for development (Claude, Codex, Aider, Gemini)
 
 ## Prerequisites
