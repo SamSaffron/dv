@@ -8,13 +8,12 @@ This project provides a containerized development environment that includes:
 - Discourse development setup
 - Essential development tools (vim, ripgrep)
 - Ready-to-use database configuration
-- Various AI agents ready for development
+- Various AI agents ready for development (Claude, Codex, Aider, Gemini)
 
 ## Prerequisites
 
 - Docker installed on your system
 - GitHub CLI (`gh`) installed and authenticated on the host
-- CURSOR_API_KEY environment variable (optional, for Cursor integration)
 
 ## Quick Start
 
