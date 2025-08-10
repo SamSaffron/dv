@@ -59,10 +59,16 @@ fi
 
 cd "$LOCAL_REPO_DIR"
 
-# Get container commit and checkout same base
+# Get container commit and create branch from same base
 CONTAINER_COMMIT=$(run_in_container "git rev-parse HEAD")
 echo "Container is at commit: $CONTAINER_COMMIT"
-git checkout "$CONTAINER_COMMIT"
+
+# Generate branch name with timestamp
+BRANCH_NAME="agent-changes-$(date +%Y%m%d-%H%M%S)"
+echo "Creating branch: $BRANCH_NAME"
+
+# Create and checkout new branch from the container's commit
+git checkout -b "$BRANCH_NAME" "$CONTAINER_COMMIT"
 
 echo "Extracting changes from container..."
 CHANGED_FILES_LIST=$(run_in_container "git status --porcelain")
@@ -93,6 +99,7 @@ CHANGED_FILES_COUNT=$(echo "$CHANGED_FILES_LIST" | wc -l)
 echo ""
 echo "✅ Changes extracted successfully!"
 echo "📁 Location: ./discourse/"
+echo "🌿 Branch: $BRANCH_NAME"
 echo "📊 Files changed: $CHANGED_FILES_COUNT"
 echo "🎯 Base commit: $CONTAINER_COMMIT"
 echo ""
