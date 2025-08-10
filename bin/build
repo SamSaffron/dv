@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Build the Docker image and tag it ai_agent
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="${SCRIPT_DIR%/bin}"
+
+IMAGE_TAG="ai_agent"
+CONTAINER_NAME="ai_agent"
+
+# Allow optional build args to be passed through
+# Usage: bin/build [--no-cache] [--build-arg FOO=bar] [...]
+
+cd "$REPO_ROOT"
+
+# If container exists, stop and remove it to avoid stale runtime
+existing_container_id="$(docker ps -aq -f name="^${CONTAINER_NAME}$")"
+if [[ -n "$existing_container_id" ]]; then
+  running_container_id="$(docker ps -q -f status=running -f name="^${CONTAINER_NAME}$")"
+  if [[ -n "$running_container_id" ]]; then
+    echo "Stopping running container '$CONTAINER_NAME'..."
+    docker stop "$CONTAINER_NAME" >/dev/null || true
+  fi
+  echo "Removing container '$CONTAINER_NAME'..."
+  docker rm "$CONTAINER_NAME" >/dev/null || true
+fi
+
+echo "Building Docker image as: $IMAGE_TAG"
+docker build -t "$IMAGE_TAG" "$@" .
+
+echo "Done. Image tagged: $IMAGE_TAG"

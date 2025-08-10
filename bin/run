@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run or attach to the ai_agent container
+# Behavior:
+# 1) If the container is not running, boot it with -d (detached)
+# 2) Then docker exec -it into it as user discourse
+# Usage: bin/run [command]
+
+IMAGE_TAG="ai_agent"
+CONTAINER_NAME="ai_agent"
+
+# Default working dir inside container (optional; adjust as needed)
+WORKDIR="/workspace"
+
+HOST_PWD="$(pwd)"
+
+container_exists() {
+  [[ -n "$(docker ps -aq -f name="^${CONTAINER_NAME}$")" ]]
+}
+
+container_running() {
+  [[ -n "$(docker ps -q -f status=running -f name="^${CONTAINER_NAME}$")" ]]
+}
+
+if ! container_exists; then
+  echo "Creating and starting container '$CONTAINER_NAME' in detached mode..."
+  docker run -d \
+    --name "$CONTAINER_NAME" \
+    -v "$HOST_PWD":"$WORKDIR" \
+    -w "$WORKDIR" \
+    "$IMAGE_TAG" \
+    -lc "sleep infinity"
+elif ! container_running; then
+  echo "Starting existing container '$CONTAINER_NAME'..."
+  docker start "$CONTAINER_NAME" >/dev/null
+fi
+
+# Exec into the running container as user discourse
+EXEC_ENV_ARGS=()
+if [[ -n "${CURSOR_API_KEY:-}" ]]; then
+  EXEC_ENV_ARGS+=(-e CURSOR_API_KEY)
+fi
+
+if [[ $# -gt 0 ]]; then
+  exec docker exec -it --user discourse -w "$WORKDIR" "${EXEC_ENV_ARGS[@]}" "$CONTAINER_NAME" "$@"
+else
+  exec docker exec -it --user discourse -w "$WORKDIR" "${EXEC_ENV_ARGS[@]}" "$CONTAINER_NAME" bash -l
+fi
