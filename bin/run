@@ -33,6 +33,7 @@ Examples:
   bin/run --reset           # Reset container and start bash session
 
 Environment Variables:
+  CI                  Always set to 1 in container (fixes unit testing)
   CURSOR_API_KEY      If set, passed through to container
   ANTHROPIC_API_KEY   If set, passed through to container
   OPENAI_API_KEY      If set, passed through to container
@@ -85,6 +86,7 @@ if ! container_exists; then
     --name "$CONTAINER_NAME" \
     -w "$WORKDIR" \
     "$IMAGE_TAG" \
+    --sysctl kernel.unprivileged_userns_clone=1 \
     -lc "sleep infinity"
 elif ! container_running; then
   echo "Starting existing container '$CONTAINER_NAME'..."
@@ -93,6 +95,9 @@ fi
 
 # Exec into the running container as user discourse
 EXEC_ENV_ARGS=()
+
+# Always set CI=1 for unit testing
+EXEC_ENV_ARGS+=(-e "CI=1")
 
 # Pass through environment variables if they exist
 ENV_VARS=(
