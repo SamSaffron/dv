@@ -40,6 +40,7 @@ Environment Variables:
   AWS_SECRET_ACCESS_KEY If set, passed through to container
   CLAUDE_CODE_USE_BEDROCK If set, passed through to container
   DEEPSEEK_API_KEY    If set, passed through to container
+  GEMINI_API_KEY    If set, passed through to container
 EOF
 }
 
@@ -102,6 +103,7 @@ ENV_VARS=(
   "AWS_SECRET_ACCESS_KEY"
   "CLAUDE_CODE_USE_BEDROCK"
   "DEEPSEEK_API_KEY"
+  "GEMINI_API_KEY"
 )
 
 for var in "${ENV_VARS[@]}"; do
