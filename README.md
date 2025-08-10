@@ -6,9 +6,9 @@ A Docker-based development environment for AI agents with Discourse integration 
 
 This project provides a containerized development environment that includes:
 - Discourse development setup
-- Cursor AI editor
 - Essential development tools (vim, ripgrep)
 - Ready-to-use database configuration
+- Various AI agents ready for development
 
 ## Prerequisites
 
@@ -83,6 +83,5 @@ The container is based on `discourse/discourse_dev:release` and includes:
 1. Build the container once: `bin/build`
 2. Start development session: `bin/run`
 3. Work with Discourse at `/var/www/discourse`
-4. Access mounted workspace at `/workspace`
 
 The container persists between sessions - stopping and restarting will maintain your development state.

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Extract changes from container's /var/www/discourse to local discourse directory
+# This script:
+# 1. Uses persistent local discourse repo (clones once, resets on subsequent runs)
+# 2. Extracts changes from container to local repo
+# 3. Leaves changes ready for manual commit and PR creation
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="${SCRIPT_DIR%/bin}"
+
+CONTAINER_NAME="ai_agent"
+DISCOURSE_DIR="/var/www/discourse"
+LOCAL_REPO_DIR="$REPO_ROOT/discourse"
+
+# Check if container is running
+container_running() {
+  [[ -n "$(docker ps -q -f status=running -f name="^${CONTAINER_NAME}$")" ]]
+}
+
+if ! container_running; then
+  echo "Error: Container '$CONTAINER_NAME' is not running."
+  echo "Please run 'bin/run' first to start the container."
+  exit 1
+fi
+
+# Check if gh CLI is available (for cloning)
+if ! command -v gh >/dev/null 2>&1; then
+  echo "Error: GitHub CLI (gh) is not installed on the host."
+  echo "Please install it: https://cli.github.com/"
+  exit 1
+fi
+
+# Function to run commands in container as discourse user
+run_in_container() {
+  docker exec --user discourse -w "$DISCOURSE_DIR" "$CONTAINER_NAME" bash -lc "$1"
+}
+
+echo "Extracting changes from $DISCOURSE_DIR..."
+
+# Check if there are any changes in the container
+if ! run_in_container "git status --porcelain" | grep -q .; then
+  echo "No changes detected in the working directory."
+  exit 1
+fi
+
+# Setup local discourse repo
+if [ ! -d "$LOCAL_REPO_DIR" ]; then
+  echo "Cloning discourse/discourse..."
+  gh repo clone discourse/discourse "$LOCAL_REPO_DIR"
+else
+  echo "Using existing discourse repo, resetting..."
+  cd "$LOCAL_REPO_DIR"
+  git reset --hard HEAD
+  git clean -fd
+  git fetch origin
+fi
+
+cd "$LOCAL_REPO_DIR"
+
+# Get container commit and checkout same base
+CONTAINER_COMMIT=$(run_in_container "git rev-parse HEAD")
+echo "Container is at commit: $CONTAINER_COMMIT"
+git checkout "$CONTAINER_COMMIT"
+
+echo "Extracting changes from container..."
+CHANGED_FILES_LIST=$(run_in_container "git status --porcelain")
+echo "Files to extract:"
+echo "$CHANGED_FILES_LIST"
+
+# Copy changed files from container
+while IFS= read -r line; do
+  if [ -n "$line" ]; then
+    status="${line:0:2}"
+    file_path="${line:3}"
+    
+    if [[ "$status" == "??" ]] || [[ "$status" =~ [AM] ]]; then
+      echo "Copying: $file_path"
+      mkdir -p "$(dirname "$file_path")" 2>/dev/null || true
+      docker cp "$CONTAINER_NAME:$DISCOURSE_DIR/$file_path" "$file_path" 2>/dev/null || {
+        echo "Warning: Could not copy $file_path"
+      }
+    elif [[ "$status" =~ D ]]; then
+      echo "Deleting: $file_path"
+      rm -f "$file_path" 2>/dev/null || true
+    fi
+  fi
+done <<< "$CHANGED_FILES_LIST"
+
+CHANGED_FILES_COUNT=$(echo "$CHANGED_FILES_LIST" | wc -l)
+
+echo ""
+echo "✅ Changes extracted successfully!"
+echo "📁 Location: ./discourse/"
+echo "📊 Files changed: $CHANGED_FILES_COUNT"
+echo "🎯 Base commit: $CONTAINER_COMMIT"
+echo ""
+echo "Next steps:"
+echo "1. cd discourse/"
+echo "2. git status  # Review changes"
+echo "3. git add .   # Stage changes"
+echo "4. git commit -m 'Your commit message'"
+echo "5. Create PR manually with gh or web interface"
