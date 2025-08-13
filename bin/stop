@@ -4,7 +4,26 @@ set -euo pipefail
 # Stop the ai_agent container
 # Usage: bin/stop [--help]
 
-CONTAINER_NAME="ai_agent"
+# Determine selected agent name (container name)
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="${SCRIPT_DIR%/bin}"
+SELECT_FILE="$REPO_ROOT/.agent-selected"
+
+get_selected() {
+  if [[ -f "$SELECT_FILE" ]]; then
+    tr -d '\n' <"$SELECT_FILE" | tr -d '\r'
+  else
+    echo ""
+  fi
+}
+
+CONTAINER_NAME_DEFAULT="ai_agent"
+SELECTED_NAME="$(get_selected)"
+if [[ -n "$SELECTED_NAME" ]]; then
+  CONTAINER_NAME="$SELECTED_NAME"
+else
+  CONTAINER_NAME="$CONTAINER_NAME_DEFAULT"
+fi
 
 show_help() {
   cat << EOF

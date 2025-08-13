@@ -1,2 +1,5 @@
 # Local discourse repo for PR creation
 discourse/
+
+# Selected agent name (managed by bin/agent)
+.agent-selected
