@@ -9,6 +9,7 @@ This project provides a containerized development environment that includes:
 - Essential development tools (vim, ripgrep)
 - Ready-to-use database configuration, fully migrated dev/test databases
 - Various AI agents ready for development (Claude, Codex, Aider, Gemini)
+ - Multi-agent container management via `bin/agent`
 
 ## Prerequisites
 
@@ -32,7 +33,28 @@ This project provides a containerized development environment that includes:
    bin/extract-changes
    ```
 
+Optional: manage multiple named containers ("agents"):
+```bash
+bin/agent --new my_project   # create and select a new agent
+bin/agent --list             # show all agents for this image
+bin/agent --select my_project
+```
+
 ## Commands
+
+### bin/agent
+```bash
+bin/agent [--help|--list|--new [NAME]|--select NAME]
+```
+
+Manage named containers ("agents") created from the `ai_agent` image and track the currently selected agent in `.agent-selected` at the repo root.
+
+**Common usage:**
+- `--list` to see containers for this image (marks the selected one)
+- `--new [NAME]` to create a new agent and select it
+- `--select NAME` to select an existing agent (creation deferred until the next `bin/run`)
+
+The selected agent is respected by `bin/run`, `bin/stop` and `bin/extract-changes`.
 
 ### bin/run
 ```bash
@@ -47,11 +69,17 @@ Run or attach to the ai_agent container with discourse user in `/var/www/discour
 
 **Examples:**
 ```bash
-bin/run                    # Start interactive bash session
-bin/run rails console      # Run rails console  
-bin/run --reset           # Reset container and start bash session
-bin/run --reset rails s   # Reset container and start rails server
+bin/run                     # Start interactive bash session
+bin/run bin/rails c         # Run Rails console
+bin/run --reset             # Reset container and start bash session
+bin/run --reset bin/rails s # Reset container and start Rails server
+# Change host port (default 4201 -> container 4200)
+HOST_PORT=4300 bin/run      # Ember CLI will be accessible on http://localhost:4300
 ```
+
+**Ports:**
+- By default the host port `4201` maps to container port `4200` (used by Ember CLI). Override with `HOST_PORT` and/or `CONTAINER_PORT`.
+- Discourse Unicorn runs inside the container on port `9292`.
 
 ### bin/stop
 ```bash
@@ -65,6 +93,8 @@ Stop the ai_agent container
 bin/stop         # Stop the container
 bin/stop --help  # Show help
 ```
+
+Respects the currently selected agent (via `.agent-selected`), defaulting to `ai_agent` if none is selected.
 
 ### bin/cleanup
 ```bash
@@ -82,6 +112,8 @@ bin/cleanup         # Stop and remove container only
 bin/cleanup --all   # Stop and remove container and image
 ```
 
+Note: `bin/cleanup` targets the default container named `ai_agent`. If you created additional named agents with `bin/agent`, remove them with `docker rm <name>` (and `docker stop` if needed).
+
 ### bin/build
 ```bash
 bin/build [docker-build-options]
@@ -95,6 +127,8 @@ bin/extract-changes
 ```
 
 Extract changes from container to local discourse/ directory
+
+Respects the currently selected agent (via `.agent-selected`), defaulting to `ai_agent` if none is selected.
 
 ## Usage
 
@@ -150,6 +184,9 @@ The following environment variables are automatically passed to the container if
 - `AWS_SECRET_ACCESS_KEY` - For AWS services access
 - `CLAUDE_CODE_USE_BEDROCK` - Configure Claude Code to use AWS Bedrock
 - `DEEPSEEK_API_KEY` - For DeepSeek API access
+- `GEMINI_API_KEY` - For Google Gemini API access
+
+Additionally, `CI=1` is always set inside the container to ensure consistent test behavior.
 
 ## Container Details
 
@@ -167,12 +204,14 @@ The container is based on `discourse/discourse_dev:release` and includes:
 .
 ├── Dockerfile          # Container definition
 ├── bin/
+│   ├── agent          # Manage named agents (list/new/select)
 │   ├── build          # Build script
 │   ├── run            # Run script  
 │   ├── stop           # Stop container
 │   ├── cleanup        # Clean up container/image
 │   └── extract-changes # Extract changes from container
 ├── discourse/          # Local discourse repo (created by extract-changes)
+├── .agent-selected     # Tracks currently selected agent name (generated)
 ├── .gitignore         # Ignores discourse/ directory
 └── README.md          # This file
 ```
