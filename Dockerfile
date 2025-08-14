@@ -25,5 +25,7 @@ RUN /sbin/boot & \
     sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && RAILS_ENV=test bin/rake db:migrate' && \
     pkill -f "/sbin/boot" || true
 
+RUN sudo -H -u discourse /bin/bash -lc "cd /var/www/discourse && npx playwright install-deps && npx playwright install"
+
 ENTRYPOINT ["/sbin/boot"]
 
