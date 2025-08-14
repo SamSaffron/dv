@@ -27,5 +27,23 @@ RUN /sbin/boot & \
 
 RUN sudo -H -u discourse /bin/bash -lc "cd /var/www/discourse && npx playwright install-deps && npx playwright install"
 
+RUN mkdir -p /etc/service/ember-cli && \
+    tee /etc/service/ember-cli/run > /dev/null <<'EOF'
+#!/bin/bash
+
+cd /var/www/discourse
+HOME=/home/discourse USER=discourse exec chpst -u discourse:discourse -U discourse:discourse bin/ember-cli
+
+sudo -u discourse:discourse 
+EOF
+RUN chmod +x /etc/service/ember-cli/run
+
+RUN mkdir -p /etc/runit/3.d && \
+    tee /etc/runit/3.d/02-ember-cli > /dev/null <<'EOF'
+#!/bin/bash
+sv stop ember-cli
+EOF
+RUN chmod +x /etc/runit/3.d/02-ember-cli
+
 ENTRYPOINT ["/sbin/boot"]
 

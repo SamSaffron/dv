@@ -35,8 +35,8 @@ fi
 WORKDIR="/var/www/discourse"
 
 # Host/container port configuration
-HOST_PORT="${HOST_PORT:-3001}"
-CONTAINER_PORT="${CONTAINER_PORT:-3000}"
+HOST_PORT="${HOST_PORT:-4201}"
+CONTAINER_PORT="${CONTAINER_PORT:-4200}"
 
 # Return 0 if port is in use, 1 otherwise
 port_in_use() {
