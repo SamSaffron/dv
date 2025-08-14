@@ -95,6 +95,7 @@ sv stop ember-cli
 EOF
 RUN chmod +x /etc/runit/3.d/02-ember-cli
 
+ENV LEFTHOOK=1
 
 ENTRYPOINT ["/sbin/boot"]
 

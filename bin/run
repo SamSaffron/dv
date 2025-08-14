@@ -142,8 +142,7 @@ if ! container_exists; then
     -w "$WORKDIR" \
     -p "${HOST_PORT}:${CONTAINER_PORT}" \
     "$IMAGE_TAG" \
-    --sysctl kernel.unprivileged_userns_clone=1 \
-    -lc "sleep infinity"
+    --sysctl kernel.unprivileged_userns_clone=1 
 elif ! container_running; then
   echo "Starting existing container '$CONTAINER_NAME'..."
   if container_has_port_binding; then
