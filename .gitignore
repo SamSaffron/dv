@@ -1,5 +1,6 @@
 # Local discourse repo for PR creation
 discourse/
+discourse_src/
 
 # Selected agent name (managed by bin/agent)
 .agent-selected

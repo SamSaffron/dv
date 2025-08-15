@@ -27,7 +27,7 @@ else
   CONTAINER_NAME="$CONTAINER_NAME_DEFAULT"
 fi
 DISCOURSE_DIR="/var/www/discourse"
-LOCAL_REPO_DIR="$REPO_ROOT/discourse"
+LOCAL_REPO_DIR="$REPO_ROOT/discourse_src"
 
 # Check if container is running
 container_running() {
@@ -113,13 +113,13 @@ CHANGED_FILES_COUNT=$(echo "$CHANGED_FILES_LIST" | wc -l)
 
 echo ""
 echo "✅ Changes extracted successfully!"
-echo "📁 Location: ./discourse/"
+echo "📁 Location: ./discourse_src/"
 echo "🌿 Branch: $BRANCH_NAME"
 echo "📊 Files changed: $CHANGED_FILES_COUNT"
 echo "🎯 Base commit: $CONTAINER_COMMIT"
 echo ""
 echo "Next steps:"
-echo "1. cd discourse/"
+echo "1. cd discourse_src/"
 echo "2. git status  # Review changes"
 echo "3. git add .   # Stage changes"
 echo "4. git commit -m 'Your commit message'"
