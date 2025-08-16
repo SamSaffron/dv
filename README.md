@@ -10,6 +10,7 @@ This project provides a containerized development environment that includes:
 - Ready-to-use database configuration, fully migrated dev/test databases
 - Various AI helpers preinstalled in the image (Claude, Codex, Aider, Gemini)
 - Multi-agent container management via `dv agent`
+ - Embedded Dockerfile managed by the CLI with safe override mechanisms
 
 ## Prerequisites
 
@@ -55,6 +56,14 @@ Build the Docker image (defaults to tag `ai_agent`).
 ./dv build [--no-cache] [--build-arg KEY=VAL] [--rm-existing]
 ```
 
+Notes:
+- Uses an embedded `Dockerfile` managed under your XDG config directory. On each build, the CLI ensures the materialized `Dockerfile` matches the embedded version via a SHA file.
+- Override precedence:
+  1) `DV_DOCKERFILE=/absolute/path/to/Dockerfile`
+  2) `${XDG_CONFIG_HOME}/dv/Dockerfile.local`
+  3) Embedded default (materialized to `${XDG_CONFIG_HOME}/dv/Dockerfile`)
+  The command prints which Dockerfile path it used.
+
 ### dv run
 Create/start the container and attach as user `discourse` in `/var/www/discourse`.
 
@@ -65,6 +74,7 @@ Create/start the container and attach as user `discourse` in `/var/www/discourse
 Notes:
 - Maps host `4201` → container `4200` by default (Ember CLI dev server). Override with flags.
 - Always sets `CI=1` and passes through common API keys from your environment.
+- Performs a pre-flight check and fails fast if the requested host port is already in use.
 
 ### dv stop
 Stop the selected or specified container.
@@ -114,6 +124,14 @@ Print the data directory path (`${XDG_DATA_HOME}/dv`).
 ./dv data
 ```
 
+### dv completion
+Generate shell completion scripts. For zsh:
+
+```bash
+./dv completion zsh           # print to stdout
+./dv completion zsh --install # install to ~/.local/share/zsh/site-functions/_dv
+```
+
 ## Environment Variables
 
 Automatically passed through when set on the host:
@@ -138,12 +156,16 @@ The image is based on `discourse/discourse_dev:release` and includes:
 - Databases created and migrated for dev/test
 - Development tools (vim, ripgrep)
 - Helper tools installed for code agents
+ - Playwright and system deps preinstalled
 
 ## File Structure
 
 ```
 .
-├── Dockerfile              # Container definition
+├── internal/
+│   └── assets/
+│       ├── Dockerfile      # Embedded container definition used by dv build
+│       └── dockerfile.go   # Embed/resolve logic (env + XDG overrides)
 ├── cmd/
 │   └── dv/                 # dv binary entrypoint
 ├── internal/
