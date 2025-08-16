@@ -75,8 +75,8 @@ func getConfigField(cfg config.Config, key string) (string, error) {
 		return cfg.DefaultContainer, nil
 	case "workdir":
 		return cfg.Workdir, nil
-	case "hostPort":
-		return fmt.Sprint(cfg.HostPort), nil
+    case "hostStartingPort":
+        return fmt.Sprint(cfg.HostStartingPort), nil
 	case "containerPort":
 		return fmt.Sprint(cfg.ContainerPort), nil
 	case "selectedAgent":
@@ -98,11 +98,11 @@ func setConfigField(cfg *config.Config, key, val string) error {
 		cfg.DefaultContainer = val
 	case "workdir":
 		cfg.Workdir = val
-	case "hostPort":
+    case "hostStartingPort":
 		var v int
 		_, err := fmt.Sscanf(val, "%d", &v)
 		if err != nil { return err }
-		cfg.HostPort = v
+        cfg.HostStartingPort = v
 	case "containerPort":
 		var v int
 		_, err := fmt.Sscanf(val, "%d", &v)

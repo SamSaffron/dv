@@ -13,7 +13,8 @@ type Config struct {
 	ImageTag            string   `json:"imageTag"`
 	DefaultContainer    string   `json:"defaultContainerName"`
 	Workdir             string   `json:"workdir"`
-	HostPort            int      `json:"hostPort"`
+    // HostStartingPort is the first port to try on the host.
+    HostStartingPort    int      `json:"hostStartingPort"`
 	ContainerPort       int      `json:"containerPort"`
 	SelectedAgent       string   `json:"selectedAgent"`
 	EnvPassthrough      []string `json:"envPassthrough"`
@@ -26,7 +27,7 @@ func Default() Config {
 		ImageTag:         "ai_agent",
 		DefaultContainer: "ai_agent",
 		Workdir:          "/var/www/discourse",
-		HostPort:         4201,
+        HostStartingPort: 4200,
 		ContainerPort:    4200,
 		EnvPassthrough: []string{
 			"CURSOR_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
@@ -56,8 +57,8 @@ func LoadOrCreate(configDir string) (Config, error) {
 		}
 		return Config{}, err
 	}
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+    var cfg Config
+    if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("invalid config: %w", err)
 	}
 	return cfg, nil

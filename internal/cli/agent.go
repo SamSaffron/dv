@@ -137,11 +137,13 @@ func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, 
 		_ = docker.Stop(name)
 		_ = docker.Remove(name)
 	}
-	if !docker.Exists(name) {
-		if isPortInUse(cfg.HostPort) {
-			return fmt.Errorf("host port %d is already in use", cfg.HostPort)
-		}
-		if err := docker.RunDetached(name, cfg.Workdir, cfg.ImageTag, cfg.HostPort, cfg.ContainerPort); err != nil { return err }
+    if !docker.Exists(name) {
+        // Choose the first available port starting from configured starting port
+        chosenPort := cfg.HostStartingPort
+        for isPortInUse(chosenPort) {
+            chosenPort++
+        }
+        if err := docker.RunDetached(name, cfg.Workdir, cfg.ImageTag, chosenPort, cfg.ContainerPort); err != nil { return err }
 	} else if !docker.Running(name) {
 		if err := docker.Start(name); err != nil { return err }
 	}

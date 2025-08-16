@@ -14,7 +14,7 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run [--reset] [--name NAME] [--host-port N] [--container-port N] [-- cmd ...]",
+    Use:   "run [--reset] [--name NAME] [--host-starting-port N] [--container-port N] [-- cmd ...]",
 	Short: "Run or attach to the container",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -27,9 +27,9 @@ var runCmd = &cobra.Command{
 		name, _ := cmd.Flags().GetString("name")
 		if name == "" { name = currentAgentName(cfg) }
 
-		hostPort, _ := cmd.Flags().GetInt("host-port")
+        hostPort, _ := cmd.Flags().GetInt("host-starting-port")
 		containerPort, _ := cmd.Flags().GetInt("container-port")
-		if hostPort == 0 { hostPort = cfg.HostPort }
+        if hostPort == 0 { hostPort = cfg.HostStartingPort }
 		if containerPort == 0 { containerPort = cfg.ContainerPort }
 
 		if reset && docker.Exists(name) {
@@ -38,12 +38,17 @@ var runCmd = &cobra.Command{
 			_ = docker.Remove(name)
 		}
 
-		if !docker.Exists(name) {
-			if isPortInUse(hostPort) {
-				return fmt.Errorf("host port %d is already in use", hostPort)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Creating and starting container '%s'...\n", name)
-			if err := docker.RunDetached(name, cfg.Workdir, cfg.ImageTag, hostPort, containerPort); err != nil { return err }
+        if !docker.Exists(name) {
+            // Find the first available host port, starting from hostPort
+            chosenPort := hostPort
+            for isPortInUse(chosenPort) {
+                chosenPort++
+            }
+            if chosenPort != hostPort {
+                fmt.Fprintf(cmd.OutOrStdout(), "Port %d in use, using %d.\n", hostPort, chosenPort)
+            }
+            fmt.Fprintf(cmd.OutOrStdout(), "Creating and starting container '%s'...\n", name)
+            if err := docker.RunDetached(name, cfg.Workdir, cfg.ImageTag, chosenPort, containerPort); err != nil { return err }
 			// give it a moment to boot services
 			time.Sleep(500 * time.Millisecond)
 		} else if !docker.Running(name) {
@@ -76,7 +81,7 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().Bool("reset", false, "Stop and remove existing container before starting fresh")
 	runCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
-	runCmd.Flags().Int("host-port", 0, "Host port to map to container port")
+    runCmd.Flags().Int("host-starting-port", 0, "First host port to try for container port mapping")
 	runCmd.Flags().Int("container-port", 0, "Container port to expose")
 }
 
