@@ -22,7 +22,7 @@ This project provides a containerized development environment that includes:
 
 1. Build the `dv` binary:
    ```bash
-   go build -o dv ./cmd/dv
+   go build
    ```
 
 2. Build the Docker image:
@@ -196,6 +196,3 @@ The image is based on `discourse/discourse_dev:release` and includes:
    git add . && git commit -m "Your message"
    ```
 
-## Legacy scripts
-
-The `bin/*` scripts remain for continuity but are being superseded by `dv`. Prefer `dv` for all workflows.
