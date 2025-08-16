@@ -5,6 +5,7 @@ import (
 
     "github.com/spf13/cobra"
 
+    "dv/internal/assets"
     "dv/internal/config"
     "dv/internal/docker"
     "dv/internal/xdg"
@@ -32,8 +33,16 @@ var buildCmd = &cobra.Command{
 			_ = docker.Stop(cfg.DefaultContainer)
 			_ = docker.Remove(cfg.DefaultContainer)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Building Docker image as: %s\n", cfg.ImageTag)
-		if err := docker.Build(cfg.ImageTag, pass); err != nil { return err }
+        dockerfilePath, contextDir, overridden, err := assets.ResolveDockerfile(configDir)
+        if err != nil { return err }
+        if overridden {
+            fmt.Fprintf(cmd.OutOrStdout(), "Using override Dockerfile: %s\n", dockerfilePath)
+        } else {
+            fmt.Fprintf(cmd.OutOrStdout(), "Using embedded Dockerfile (sha=%s) at: %s\n", assets.EmbeddedDockerfileSHA256()[:12], dockerfilePath)
+        }
+
+        fmt.Fprintf(cmd.OutOrStdout(), "Building Docker image as: %s\n", cfg.ImageTag)
+        if err := docker.BuildFrom(cfg.ImageTag, dockerfilePath, contextDir, pass); err != nil { return err }
 		fmt.Fprintln(cmd.OutOrStdout(), "Done.")
 		return nil
 	},
