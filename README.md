@@ -1,6 +1,6 @@
 # Discourse AI Agent Container
 
-A Docker-based development environment for AI agents with Discourse. A Go CLI named `dv` replaces the legacy `bin/*` scripts and stores config/data under XDG paths.
+A Docker-based development environment for AI agents with Discourse.
 
 ## Overview
 
