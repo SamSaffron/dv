@@ -17,10 +17,27 @@ import (
 //go:embed Dockerfile
 var embeddedDockerfile []byte
 
+//go:embed Dockerfile.theme
+var embeddedDockerfileTheme []byte
+
+//go:embed CLAUDE.md.theme
+var embeddedClaudeMdTheme []byte
+
 // EmbeddedDockerfileSHA256 returns the hex-encoded SHA-256 of the embedded Dockerfile.
 func EmbeddedDockerfileSHA256() string {
     sum := sha256.Sum256(embeddedDockerfile)
     return hex.EncodeToString(sum[:])
+}
+
+// EmbeddedDockerfileThemeSHA256 returns the hex-encoded SHA-256 of the embedded theme Dockerfile.
+func EmbeddedDockerfileThemeSHA256() string {
+    sum := sha256.Sum256(embeddedDockerfileTheme)
+    return hex.EncodeToString(sum[:])
+}
+
+// GetEmbeddedClaudeMdTheme returns the contents of the embedded CLAUDE.md.theme file.
+func GetEmbeddedClaudeMdTheme() []byte {
+    return embeddedClaudeMdTheme
 }
 
 // ResolveDockerfile determines which Dockerfile to use and ensures it exists.
@@ -30,16 +47,36 @@ func EmbeddedDockerfileSHA256() string {
 // 3) The embedded Dockerfile, extracted to <configDir>/Dockerfile if missing or outdated
 // It returns (dockerfilePath, contextDir, usedOverride, error)
 func ResolveDockerfile(configDir string) (string, string, bool, error) {
+    return resolveDockerfileInternal(configDir, "Dockerfile", embeddedDockerfile, EmbeddedDockerfileSHA256())
+}
+
+// ResolveDockerfileTheme determines which theme Dockerfile to use and ensures it exists.
+// Priority:
+// 1) Environment variable DV_DOCKERFILE_THEME points to an existing file
+// 2) A user-provided override at <configDir>/Dockerfile.theme.local
+// 3) The embedded Dockerfile.theme, extracted to <configDir>/Dockerfile.theme if missing or outdated
+// It returns (dockerfilePath, contextDir, usedOverride, error)
+func ResolveDockerfileTheme(configDir string) (string, string, bool, error) {
+    return resolveDockerfileInternal(configDir, "Dockerfile.theme", embeddedDockerfileTheme, EmbeddedDockerfileThemeSHA256())
+}
+
+// resolveDockerfileInternal is a helper function to resolve Dockerfiles with different names
+func resolveDockerfileInternal(configDir string, fileName string, embeddedContent []byte, embeddedSHA string) (string, string, bool, error) {
     // Env override takes precedence
-    if envPath, ok := os.LookupEnv("DV_DOCKERFILE"); ok && envPath != "" {
+    envVar := "DV_DOCKERFILE"
+    if fileName == "Dockerfile.theme" {
+        envVar = "DV_DOCKERFILE_THEME"
+    }
+    if envPath, ok := os.LookupEnv(envVar); ok && envPath != "" {
         if info, err := os.Stat(envPath); err == nil && !info.IsDir() {
             return envPath, filepath.Dir(envPath), true, nil
         }
-        return "", "", false, fmt.Errorf("DV_DOCKERFILE path does not exist: %s", envPath)
+        return "", "", false, fmt.Errorf("%s path does not exist: %s", envVar, envPath)
     }
 
     // Local override in config directory
-    localOverride := filepath.Join(configDir, "Dockerfile.local")
+    localSuffix := ".local"
+    localOverride := filepath.Join(configDir, fileName + localSuffix)
     if info, err := os.Stat(localOverride); err == nil && !info.IsDir() {
         return localOverride, configDir, true, nil
     }
@@ -48,10 +85,10 @@ func ResolveDockerfile(configDir string) (string, string, bool, error) {
     if err := os.MkdirAll(configDir, 0o755); err != nil {
         return "", "", false, err
     }
-    targetPath := filepath.Join(configDir, "Dockerfile")
-    shaPath := filepath.Join(configDir, "Dockerfile.sha256")
+    targetPath := filepath.Join(configDir, fileName)
+    shaPath := filepath.Join(configDir, fileName + ".sha256")
 
-    embeddedSHA := EmbeddedDockerfileSHA256()
+    // Use the provided SHA from the calling function
     needWrite := false
 
     // Decide whether to write/update the Dockerfile
@@ -66,7 +103,7 @@ func ResolveDockerfile(configDir string) (string, string, bool, error) {
     }
 
     if needWrite {
-        if err := os.WriteFile(targetPath, embeddedDockerfile, 0o644); err != nil {
+        if err := os.WriteFile(targetPath, embeddedContent, 0o644); err != nil {
             return "", "", false, err
         }
         if err := os.WriteFile(shaPath, []byte(embeddedSHA+"\n"), 0o644); err != nil {

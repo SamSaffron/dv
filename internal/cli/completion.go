@@ -24,6 +24,11 @@ var completionZshCmd = &cobra.Command{
     Use:   "zsh",
     Short: "Generate zsh completion script",
     Long:  "Generate zsh completion script. Use --install to install into your user site-functions directory.",
+    Args:  cobra.NoArgs,
+    // No positional args; show flags on TAB instead of files
+    ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+        return nil, cobra.ShellCompDirectiveNoFileComp
+    },
     RunE: func(cmd *cobra.Command, args []string) error {
         if zshInstall {
             return installZshCompletion(cmd)
@@ -70,6 +75,11 @@ var completionBashCmd = &cobra.Command{
     Use:   "bash",
     Short: "Generate bash completion script",
     Long:  "Generate bash completion script. Use --install to install into your user bash-completion directory.",
+    Args:  cobra.NoArgs,
+    // No positional args; show flags on TAB instead of files
+    ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+        return nil, cobra.ShellCompDirectiveNoFileComp
+    },
     RunE: func(cmd *cobra.Command, args []string) error {
         if bashInstall {
             return installBashCompletion(cmd)

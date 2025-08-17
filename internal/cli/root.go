@@ -33,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(extractCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(dataCmd)
+    rootCmd.AddCommand(imageCmd)
 }
 
 func exitIfErr(err error) {

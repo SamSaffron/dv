@@ -1,5 +1,3 @@
 # Local discourse repo for PR creation
-discourse/
-discourse_src/
-
 dv
+.gocache/*

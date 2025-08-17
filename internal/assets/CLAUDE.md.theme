@@ -1,0 +1,182 @@
+# Discourse Theme Development Guide
+
+This guide documents how to use this container environment for developing Discourse themes. The primary interface is the `dv` Go CLI.
+
+## Theme Development Environment
+
+The theme development container provides a specialized environment for building and testing Discourse themes with the following features:
+
+- Fully functional Discourse instance running locally
+- Automatic theme watching and live reloading
+- Theme component development support
+- Built-in tools for theme testing
+- Integration with the Discourse Theme CLI
+
+## Key Files and Directories
+
+- `/var/www/themes/current`: Working directory for the current theme
+- `/var/www/discourse`: The main Discourse codebase (accessible but not the primary focus)
+
+## Theme Development Workflow
+
+### 1. Building the Theme Container
+
+To build the theme development container, run:
+
+```bash
+./dv build --theme
+```
+
+### 2. Creating a New Theme Container
+
+To create a new container for theme development:
+
+```bash
+./dv agent new --theme my_theme_agent
+```
+
+### 3. Starting a Theme Development Session
+
+```bash
+./dv run --theme
+```
+
+Or if you've already created a theme container:
+
+```bash
+./dv run --name my_theme_agent
+```
+
+### 4. Creating a New Theme
+
+Once inside the container, create a new theme:
+
+```bash
+mkdir -p /var/www/themes
+cd /var/www/themes
+discourse_theme new my-awesome-theme
+cd my-awesome-theme
+git init
+git add .
+git commit -m "Initial theme setup"
+```
+
+To link the theme to the watching service:
+
+```bash
+ln -sf $(pwd) /var/www/themes/current
+sv restart theme-watcher
+```
+
+### 5. Theme Development
+
+Themes are composed of the following files:
+
+- `about.json`: Theme metadata
+- `common/`: Assets used in both desktop and mobile
+  - `common.scss`: Common CSS styles
+  - `header.html`: Header template customizations
+  - `footer.html`: Footer template customizations
+- `desktop/`: Desktop-specific assets
+  - `desktop.scss`: Desktop-specific CSS
+- `mobile/`: Mobile-specific assets
+  - `mobile.scss`: Mobile-specific CSS
+- `settings.yml`: Theme settings configuration
+
+### 6. Exporting Theme Changes
+
+After making changes to your theme, export them to the host:
+
+```bash
+./dv extract
+```
+
+This will extract your theme's code to `~/.local/share/dv/themes/my-awesome-theme/` on the host.
+
+## Theme Development Best Practices
+
+### Component Structure
+
+- Keep themes modular by separating concerns
+- Use theme components for reusable functionality
+- Use CSS custom properties for theming variables
+
+### CSS Guidelines
+
+- Use Discourse's CSS variables where possible:
+  - `var(--primary)`: Primary text color
+  - `var(--secondary)`: Secondary background color
+  - `var(--tertiary)`: Brand/accent color
+  - `var(--highlight)`: Highlight color for selections
+  - `var(--danger)`: Error/destructive action color
+  - `var(--success)`: Success/positive action color
+  - `var(--love)`: Love/heart action color
+
+### JavaScript Guidelines
+
+- Use theme settings for configurable options
+- Place JavaScript in `common/common.js` or specific device files
+- Access Discourse API via the `api` global
+
+```javascript
+api.decorateWidget('header-buttons:before', helper => {
+  return helper.h('button.my-custom-button', 'Click Me');
+});
+```
+
+### Settings Schema
+
+Define settings in `settings.yml` using this format:
+
+```yaml
+theme_name:
+  default: My Awesome Theme
+  description: The name of this theme
+
+custom_header:
+  default: ""
+  description: Custom HTML for the header
+  type: list
+```
+
+## Testing Your Theme
+
+### Preview Mode
+
+Access your theme via the Discourse admin interface:
+
+1. Go to http://localhost:4200
+2. Log in with admin (username: admin, password: password)
+3. Navigate to Admin > Customize > Themes
+4. Select your theme to preview changes
+
+### Theme CLI Commands
+
+Useful commands for theme development:
+
+```bash
+# Watch for changes (already running as a service)
+discourse_theme watch
+
+# Update theme settings
+discourse_theme update settings
+
+# Package your theme for distribution
+discourse_theme package my-theme.zip
+
+# Get theme development help
+discourse_theme help
+```
+
+## Safety Constraints
+
+- Don't modify the Discourse core files directly
+- Keep theme JavaScript to a minimum
+- Use theme components for advanced customizations
+
+## Troubleshooting
+
+- Theme not updating: Check the theme-watcher service with `sv status theme-watcher`
+- Theme not applying: Verify theme is enabled in Discourse admin
+- CSS not working: Check browser console for errors
+- Theme settings not appearing: Verify settings.yml format

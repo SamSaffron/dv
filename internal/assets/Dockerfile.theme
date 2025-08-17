@@ -1,0 +1,34 @@
+FROM ai_agent
+
+# Install discourse_theme gem for theme development
+RUN sudo -H -u discourse /bin/bash -lc 'gem install discourse_theme'
+
+# Create a directory for theme development
+RUN mkdir -p /var/www/themes
+RUN chown -R discourse:discourse /var/www/themes
+
+# Create theme service
+RUN mkdir -p /etc/service/theme-watcher && \
+    tee /etc/service/theme-watcher/run > /dev/null <<'EOF'
+#!/bin/bash
+
+# Wait for Discourse to be ready
+sleep 10
+
+cd /var/www/themes
+if [ -d "/var/www/themes/current" ]; then
+    cd /var/www/themes/current
+    HOME=/home/discourse USER=discourse exec chpst -u discourse:discourse -U discourse:discourse discourse_theme watch
+else
+    # Just sleep if no theme directory exists yet
+    exec sleep infinity
+fi
+EOF
+RUN chmod +x /etc/service/theme-watcher/run
+
+RUN mkdir -p /etc/runit/3.d && \
+    tee /etc/runit/3.d/04-theme-watcher > /dev/null <<'EOF'
+#!/bin/bash
+sv stop theme-watcher
+EOF
+RUN chmod +x /etc/runit/3.d/04-theme-watcher

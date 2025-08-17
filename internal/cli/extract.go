@@ -19,7 +19,7 @@ import (
 
 var extractCmd = &cobra.Command{
 	Use:   "extract",
-	Short: "Extract changes from container's Discourse tree into local repo",
+	Short: "Extract changes from container's code tree into local repo",
 	RunE: func(cmd *cobra.Command, args []string) error {
         // Flags controlling post-extract behavior and output
         chdir, _ := cmd.Flags().GetBool("chdir")
@@ -38,8 +38,13 @@ var extractCmd = &cobra.Command{
         if !docker.Running(name) {
             return fmt.Errorf("container '%s' is not running; run 'dv run' first", name)
         }
-
-		work := cfg.Workdir
+        
+        // Determine image associated with this container, falling back to selected image
+        imgName := cfg.ContainerImages[name]
+        _, imgCfg, err := resolveImage(cfg, imgName)
+        if err != nil { return err }
+        isTheme := imgCfg.Kind == "theme"
+        work := imgCfg.Workdir
         // Check for changes
         status, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git status --porcelain"})
 		if err != nil { return err }
@@ -58,12 +63,33 @@ var extractCmd = &cobra.Command{
         }
 
         // Ensure local clone
-		localRepo := filepath.Join(dataDir, "discourse_src")
+		var localRepo string
+		var repoCloneUrl string
+		
+		if isTheme {
+			// For themes, use the theme name for the local repo
+			themeName, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "basename $(pwd)"})
+			if err != nil { return err }
+			themeName = strings.TrimSpace(themeName)
+			
+			// Create themes directory if it doesn't exist
+			themesDir := filepath.Join(dataDir, "themes")
+			if err := os.MkdirAll(themesDir, 0o755); err != nil { return err }
+			localRepo = filepath.Join(themesDir, themeName)
+			
+			// Get the remote URL from the theme repo
+			repoCloneUrl, err = docker.ExecOutput(name, work, []string{"bash", "-lc", "git config --get remote.origin.url"})
+			repoCloneUrl = strings.TrimSpace(repoCloneUrl)
+		} else {
+			// For app development, use the discourse_src directory
+			localRepo = filepath.Join(dataDir, "discourse_src")
+			repoCloneUrl = cfg.DiscourseRepo
+		}
         if _, err := os.Stat(localRepo); os.IsNotExist(err) {
-            fmt.Fprintln(logOut, "Cloning discourse/discourse...")
-            if err := runCmdCapture(procOut, procErr, "git", "clone", cfg.DiscourseRepo, localRepo); err != nil { return err }
+            fmt.Fprintf(logOut, "Cloning %s...\n", repoCloneUrl)
+            if err := runCmdCapture(procOut, procErr, "git", "clone", repoCloneUrl, localRepo); err != nil { return err }
         } else {
-            fmt.Fprintln(logOut, "Using existing discourse repo, resetting...")
+            fmt.Fprintln(logOut, "Using existing repo, resetting...")
             if err := runInDir(localRepo, procOut, procErr, "git", "reset", "--hard", "HEAD"); err != nil { return err }
             if err := runInDir(localRepo, procOut, procErr, "git", "clean", "-fd"); err != nil { return err }
             if err := runInDir(localRepo, procOut, procErr, "git", "fetch", "origin"); err != nil { return err }
@@ -75,7 +101,10 @@ var extractCmd = &cobra.Command{
 		commit = strings.TrimSpace(commit)
         fmt.Fprintf(logOut, "Container is at commit: %s\n", commit)
 
-		branch := fmt.Sprintf("%s-%s", cfg.ExtractBranchPrefix, time.Now().Format("20060102-150405"))
+		// Create an appropriate branch prefix based on container type
+        branchPrefix := cfg.ExtractBranchPrefix
+        if isTheme { branchPrefix = "theme-changes" }
+		branch := fmt.Sprintf("%s-%s", branchPrefix, time.Now().Format("20060102-150405"))
         fmt.Fprintf(logOut, "Creating branch: %s\n", branch)
         if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-b", branch, commit); err != nil { return err }
 

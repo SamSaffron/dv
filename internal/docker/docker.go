@@ -112,6 +112,12 @@ func CopyFromContainer(name, srcInContainer, dstOnHost string) error {
 	return cmd.Run()
 }
 
+func CopyToContainer(name, srcOnHost, dstInContainer string) error {
+	cmd := exec.Command("docker", "cp", srcOnHost, fmt.Sprintf("%s:%s", name, dstInContainer))
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 func shellEscape(s string) string {
 	var b bytes.Buffer
 	for _, r := range s {
