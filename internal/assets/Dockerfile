@@ -13,6 +13,7 @@ RUN npm install -g @google/gemini-cli
 RUN sudo -H -u discourse /bin/bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
 RUN sudo -H -u discourse /bin/bash -lc 'curl -LsSf https://aider.chat/install.sh | sh'
 RUN sudo -H -u discourse /bin/bash -lc 'curl -fsS https://cursor.com/install | bash'
+RUN sudo -H -u discourse /bin/bash -lc 'curl -fsSL https://opencode.ai/install | bash'
 
 RUN chown discourse:discourse /var/www
 RUN sudo -H -u discourse /bin/bash -lc 'git clone https://github.com/discourse/discourse.git /var/www/discourse'
