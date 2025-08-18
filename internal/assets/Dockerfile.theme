@@ -5,7 +5,18 @@ RUN sudo -H -u discourse /bin/bash -lc 'gem install discourse_theme'
 
 # Create a directory for theme development
 RUN mkdir -p /var/www/themes
+RUN cd /var/www/themes && \
+    git clone https://github.com/discourse/discourse-theme-skeleton.git current
 RUN chown -R discourse:discourse /var/www/themes
+
+# Boot services, generate admin API key, and write /home/discourse/.discourse_theme
+RUN /sbin/boot & \
+    sleep 10 && \
+    KEY=$(sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && RAILS_ENV=development bin/rails r "u=User.find_by(username:\"admin\"); k=ApiKey.create!(user: u, description: \"theme dev\"); puts k.key"') && \
+    printf '%s\n' '---' '"/var/www/themes/current":' '  url: http://localhost:4200' 'api_keys:' "  http://localhost:4200: ${KEY}" > /home/discourse/.discourse_theme && \
+    chown discourse:discourse /home/discourse/.discourse_theme && \
+    pkill -f '/sbin/boot' || true
+
 
 # Create theme service
 RUN mkdir -p /etc/service/theme-watcher && \

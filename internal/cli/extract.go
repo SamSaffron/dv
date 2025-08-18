@@ -7,6 +7,7 @@ import (
     "os"
     "os/exec"
     "path/filepath"
+    "net/url"
     "strings"
     "time"
 
@@ -86,8 +87,10 @@ var extractCmd = &cobra.Command{
 			repoCloneUrl = cfg.DiscourseRepo
 		}
         if _, err := os.Stat(localRepo); os.IsNotExist(err) {
-            fmt.Fprintf(logOut, "Cloning %s...\n", repoCloneUrl)
-            if err := runCmdCapture(procOut, procErr, "git", "clone", repoCloneUrl, localRepo); err != nil { return err }
+            // Prefer SSH when possible; fall back to HTTPS
+            candidates := makeCloneCandidates(repoCloneUrl)
+            fmt.Fprintf(logOut, "Cloning (trying %d URL(s))...\n", len(candidates))
+            if err := cloneWithFallback(procOut, procErr, candidates, localRepo); err != nil { return err }
         } else {
             fmt.Fprintln(logOut, "Using existing repo, resetting...")
             if err := runInDir(localRepo, procOut, procErr, "git", "reset", "--hard", "HEAD"); err != nil { return err }
@@ -177,4 +180,95 @@ func runInDir(dir string, stdout, stderr io.Writer, name string, args ...string)
     c.Stdout, c.Stderr = stdout, stderr
     c.Dir = dir
     return c.Run()
+}
+
+// makeCloneCandidates returns preferred clone URLs: SSH first if derivable, then original, then HTTPS fallbacks.
+func makeCloneCandidates(original string) []string {
+    var candidates []string
+    // Try to derive SSH from the original
+    if ssh, ok := toSSH(original); ok {
+        candidates = append(candidates, ssh)
+    }
+    // Always include the original as next try to respect explicit config
+    candidates = append(candidates, original)
+    // And finally try a HTTPS form if derivable and different from original
+    if https, ok := toHTTPS(original); ok && https != original {
+        candidates = append(candidates, https)
+    }
+    // Deduplicate while preserving order
+    seen := map[string]struct{}{}
+    unique := make([]string, 0, len(candidates))
+    for _, c := range candidates {
+        if _, exists := seen[c]; exists { continue }
+        seen[c] = struct{}{}
+        unique = append(unique, c)
+    }
+    return unique
+}
+
+// toSSH converts common HTTPS/SSH URL forms into scp-like SSH (git@host:path) when possible.
+func toSSH(raw string) (string, bool) {
+    // Already in git@host:path form
+    if strings.HasPrefix(raw, "git@") && strings.Contains(raw, ":") {
+        return raw, true
+    }
+    // ssh://git@host/owner/repo.git
+    if strings.HasPrefix(strings.ToLower(raw), "ssh://") {
+        u, err := url.Parse(raw)
+        if err != nil || u.Host == "" { return "", false }
+        user := u.User.Username()
+        if user == "" { user = "git" }
+        p := strings.TrimPrefix(u.Path, "/")
+        if p == "" { return "", false }
+        return fmt.Sprintf("%s@%s:%s", user, u.Host, p), true
+    }
+    // https://host/owner/repo(.git)
+    if strings.HasPrefix(strings.ToLower(raw), "http://") || strings.HasPrefix(strings.ToLower(raw), "https://") {
+        u, err := url.Parse(raw)
+        if err != nil || u.Host == "" { return "", false }
+        user := "git"
+        p := strings.TrimPrefix(u.Path, "/")
+        if p == "" { return "", false }
+        return fmt.Sprintf("%s@%s:%s", user, u.Host, p), true
+    }
+    return "", false
+}
+
+// toHTTPS converts git@host:path and ssh:// URLs to https://host/path form when possible.
+func toHTTPS(raw string) (string, bool) {
+    lower := strings.ToLower(raw)
+    if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+        return raw, true
+    }
+    if strings.HasPrefix(raw, "git@") && strings.Contains(raw, ":") {
+        // git@host:owner/repo(.git)
+        parts := strings.SplitN(strings.TrimPrefix(raw, "git@"), ":", 2)
+        if len(parts) != 2 { return "", false }
+        host := parts[0]
+        path := parts[1]
+        if strings.TrimSpace(host) == "" || strings.TrimSpace(path) == "" { return "", false }
+        return fmt.Sprintf("https://%s/%s", host, path), true
+    }
+    if strings.HasPrefix(lower, "ssh://") {
+        u, err := url.Parse(raw)
+        if err != nil || u.Host == "" { return "", false }
+        p := strings.TrimPrefix(u.Path, "/")
+        if p == "" { return "", false }
+        return fmt.Sprintf("https://%s/%s", u.Host, p), true
+    }
+    return "", false
+}
+
+// cloneWithFallback attempts to clone using each URL until one succeeds.
+func cloneWithFallback(stdout, stderr io.Writer, urls []string, dest string) error {
+    var errs []string
+    for _, u := range urls {
+        fmt.Fprintf(stderr, "git clone %s %s\n", u, dest)
+        if err := runCmdCapture(stdout, stderr, "git", "clone", u, dest); err == nil {
+            return nil
+        } else {
+            errs = append(errs, fmt.Sprintf("%s: %v", u, err))
+        }
+    }
+    return fmt.Errorf("all clone attempts failed:\n%s", strings.Join(errs, "\n"))
 }
