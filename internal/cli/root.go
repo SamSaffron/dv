@@ -34,7 +34,7 @@ func init() {
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(enterCmd)
 	rootCmd.AddCommand(stopCmd)
-	rootCmd.AddCommand(cleanupCmd)
+	rootCmd.AddCommand(removeCmd)
 	// Top-level agent management commands
 	rootCmd.AddCommand(agentListTopCmd)
 	rootCmd.AddCommand(agentNewTopCmd)

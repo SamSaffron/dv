@@ -11,11 +11,9 @@ import (
 	"dv/internal/xdg"
 )
 
-var cleanupCmd = &cobra.Command{
-	Use:        "remove",
-	Aliases:    []string{"cleanup"},
-	Short:      "Remove container and optionally its image",
-	Deprecated: "use 'dv remove' instead of 'dv cleanup'",
+var removeCmd = &cobra.Command{
+	Use:   "remove",
+	Short: "Remove container and optionally its image",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -26,7 +24,7 @@ var cleanupCmd = &cobra.Command{
 			return err
 		}
 
-		removeImage, _ := cmd.Flags().GetBool("all")
+		removeImage, _ := cmd.Flags().GetBool("image")
 		name, _ := cmd.Flags().GetString("name")
 		if name == "" {
 			name = currentAgentName(cfg)
@@ -85,12 +83,12 @@ var cleanupCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Fprintln(cmd.OutOrStdout(), "Cleanup complete")
+		fmt.Fprintln(cmd.OutOrStdout(), "Removal complete")
 		return nil
 	},
 }
 
 func init() {
-	cleanupCmd.Flags().Bool("image", false, "Also remove the Docker image after removing container")
-	cleanupCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
+	removeCmd.Flags().Bool("image", false, "Also remove the Docker image after removing container")
+	removeCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
 }

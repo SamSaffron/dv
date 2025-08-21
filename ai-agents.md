@@ -67,6 +67,7 @@ Playwright preinstalled with dependencies; no extra setup needed.
 - Don't modify `Dockerfile` without explicit instructions
 - `dv extract` resets local clone; commit host changes first
 - Use caution with `dv remove --image` as it removes the image
+- Do not commit changes from the AI assistant. The human maintainer will review and commit. When proposing edits, apply them locally without creating git commits.
 
 ## Typical Workflows
 1. Build and start:

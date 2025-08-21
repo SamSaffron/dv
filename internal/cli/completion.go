@@ -10,11 +10,11 @@ import (
 )
 
 var completionCmd = &cobra.Command{
-    Use:   "completion",
-    Short: "Generate shell completion scripts",
-    Long:  "Generate shell completion scripts for dv. Use 'dv config completion zsh' to print the zsh completion script.",
-    // Do not show this command at the top level (we attach under config)
-    Hidden: true,
+	Use:   "completion",
+	Short: "Generate shell completion scripts",
+	Long:  "Generate shell completion scripts for dv. Use 'dv config completion zsh' to print the zsh completion script.",
+	// Do not show this command at the top level (we attach under config)
+	Hidden: true,
 }
 
 var (
