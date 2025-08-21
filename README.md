@@ -9,7 +9,7 @@ This project provides a containerized development environment that includes:
 - Essential developer tools (vim, ripgrep)
 - Ready-to-use database configuration, fully migrated dev/test databases
 - Various AI helpers preinstalled in the image (Claude, Codex, Aider, Gemini)
-- Multi-agent container management via `dv agent`
+- Multi-agent container management via `dv` top-level commands (`list`, `new`, `select`, `rename`) and the `agent` group
  - Embedded Dockerfile managed by the CLI with safe override mechanisms
 
 ## Prerequisites
@@ -47,9 +47,10 @@ This project provides a containerized development environment that includes:
 
 Optional: manage multiple named containers ("agents"):
 ```bash
-./dv agent new my_project   # create and select a new agent
-./dv agent list             # show all agents for this image
-./dv agent select my_project
+./dv new my_project     # create and select a new agent
+./dv list               # show all agents for the selected image
+./dv select my_project  # select an existing agent
+./dv rename old new     # rename an agent
 ```
 
 ## dv Commands
@@ -104,13 +105,14 @@ Remove the container and optionally the image.
 ./dv cleanup [--all] [--name NAME]
 ```
 
-### dv agent
-Manage multiple containers for this image; selection is stored in XDG config.
+### Agent management
+Manage multiple containers for the selected image; selection is stored in XDG config.
 
 ```bash
-./dv agent list
-./dv agent new [NAME]
-./dv agent select NAME
+./dv list
+./dv new [NAME]
+./dv select NAME
+./dv rename OLD NEW
 ```
 
 ### dv extract

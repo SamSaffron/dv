@@ -31,6 +31,12 @@ func Remove(name string) error {
 	return cmd.Run()
 }
 
+func Rename(oldName, newName string) error {
+	cmd := exec.Command("docker", "rename", oldName, newName)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 func Build(tag string, args []string) error {
 	argv := []string{"build", "-t", tag}
 	argv = append(argv, args...)

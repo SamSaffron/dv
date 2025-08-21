@@ -154,6 +154,72 @@ func init() {
 	agentCmd.AddCommand(agentSelectCmd)
 }
 
+// Top-level convenience commands: `dv list`, `dv new`, `dv select`, `dv rename`
+var agentListTopCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List containers for the selected image (alias for 'agent list')",
+	RunE:  agentListCmd.RunE,
+}
+
+var agentNewTopCmd = &cobra.Command{
+	Use:   "new [NAME]",
+	Short: "Create and select a new agent (alias for 'agent new')",
+	Args:  agentNewCmd.Args,
+	RunE:  agentNewCmd.RunE,
+}
+
+var agentSelectTopCmd = &cobra.Command{
+	Use:   "select NAME",
+	Short: "Select an agent (alias for 'agent select')",
+	Args:  agentSelectCmd.Args,
+	RunE:  agentSelectCmd.RunE,
+}
+
+var agentRenameTopCmd = &cobra.Command{
+	Use:   "rename OLD NEW",
+	Short: "Rename an existing agent container",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		oldName := strings.TrimSpace(args[0])
+		newName := strings.TrimSpace(args[1])
+		if oldName == "" || newName == "" {
+			return fmt.Errorf("invalid names")
+		}
+		configDir, err := xdg.ConfigDir()
+		if err != nil {
+			return err
+		}
+		cfg, err := config.LoadOrCreate(configDir)
+		if err != nil {
+			return err
+		}
+		if !docker.Exists(oldName) {
+			return fmt.Errorf("agent '%s' does not exist", oldName)
+		}
+		if docker.Exists(newName) {
+			return fmt.Errorf("an agent named '%s' already exists", newName)
+		}
+		if err := docker.Rename(oldName, newName); err != nil {
+			return err
+		}
+		// Update selection and mappings
+		if cfg.SelectedAgent == oldName {
+			cfg.SelectedAgent = newName
+		}
+		if cfg.ContainerImages != nil {
+			if img, ok := cfg.ContainerImages[oldName]; ok {
+				delete(cfg.ContainerImages, oldName)
+				cfg.ContainerImages[newName] = img
+			}
+		}
+		if err := config.Save(configDir, cfg); err != nil {
+			return err
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Renamed agent '%s' -> '%s'\n", oldName, newName)
+		return nil
+	},
+}
+
 func autogenName() string {
 	return fmt.Sprintf("ai_agent_%s", time.Now().Format("20060102-150405"))
 }
