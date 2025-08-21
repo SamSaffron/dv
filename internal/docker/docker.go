@@ -79,14 +79,21 @@ func Start(name string) error {
 	return cmd.Run()
 }
 
-func RunDetached(name, workdir, image string, hostPort, containerPort int) error {
-	cmd := exec.Command("docker", "run", "-d",
+func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string) error {
+	args := []string{"run", "-d",
 		"--name", name,
 		"-w", workdir,
 		"-p", fmt.Sprintf("%d:%d", hostPort, containerPort),
-		image,
-		"--sysctl", "kernel.unprivileged_userns_clone=1",
-	)
+	}
+	// Apply labels for provenance and discovery
+	for k, v := range labels {
+		if strings.TrimSpace(k) == "" || strings.Contains(k, "\n") {
+			continue
+		}
+		args = append(args, "--label", fmt.Sprintf("%s=%s", k, v))
+	}
+	args = append(args, image, "--sysctl", "kernel.unprivileged_userns_clone=1")
+	cmd := exec.Command("docker", args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }

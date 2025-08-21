@@ -71,19 +71,37 @@ func completeAgentNames(cmd *cobra.Command, toComplete string) ([]string, cobra.
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}'")
+	out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Labels}}'")
 	var suggestions []string
 	prefix := strings.ToLower(strings.TrimSpace(toComplete))
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 2)
+		parts := strings.SplitN(line, "\t", 3)
 		if len(parts) < 2 {
 			continue
 		}
 		name, image := parts[0], parts[1]
-		if image != imgCfg.Tag {
+		labelsField := ""
+		if len(parts) >= 3 {
+			labelsField = parts[2]
+		}
+		belongs := false
+		if imgNameFromCfg, ok := cfg.ContainerImages[name]; ok && imgNameFromCfg == cfg.SelectedImage {
+			belongs = true
+		}
+		if !belongs {
+			if labelMap := parseLabels(labelsField); labelMap["com.dv.owner"] == "dv" && labelMap["com.dv.image-name"] == cfg.SelectedImage {
+				belongs = true
+			}
+		}
+		if !belongs {
+			if image == imgCfg.Tag {
+				belongs = true
+			}
+		}
+		if !belongs {
 			continue
 		}
 		if prefix == "" || strings.HasPrefix(strings.ToLower(name), prefix) {
@@ -126,10 +144,10 @@ func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, 
 	}
 	workdir := imgCfg.Workdir
 	imageTag := imgCfg.Tag
-	return ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, reset)
+	return ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, reset)
 }
 
-func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, name string, workdir string, imageTag string, reset bool) error {
+func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, name string, workdir string, imageTag string, imgName string, reset bool) error {
 	if reset && docker.Exists(name) {
 		_ = docker.Stop(name)
 		_ = docker.Remove(name)
@@ -140,7 +158,12 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 		for isPortInUse(chosenPort) {
 			chosenPort++
 		}
-		if err := docker.RunDetached(name, workdir, imageTag, chosenPort, cfg.ContainerPort); err != nil {
+		labels := map[string]string{
+			"com.dv.owner":      "dv",
+			"com.dv.image-name": imgName,
+			"com.dv.image-tag":  imageTag,
+		}
+		if err := docker.RunDetached(name, workdir, imageTag, chosenPort, cfg.ContainerPort, labels); err != nil {
 			return err
 		}
 	} else if !docker.Running(name) {

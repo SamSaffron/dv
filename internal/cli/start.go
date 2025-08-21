@@ -68,7 +68,12 @@ var startCmd = &cobra.Command{
 				fmt.Fprintf(cmd.OutOrStdout(), "Port %d in use, using %d.\n", hostPort, chosenPort)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Creating and starting container '%s' with image '%s'...\n", name, imageTag)
-			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort); err != nil {
+			labels := map[string]string{
+				"com.dv.owner":      "dv",
+				"com.dv.image-name": imgName,
+				"com.dv.image-tag":  imageTag,
+			}
+			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort, labels); err != nil {
 				return err
 			}
 

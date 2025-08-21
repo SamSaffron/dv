@@ -28,15 +28,15 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
-		// Include Ports column to display published host ports for click-through URLs
-		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'")
+		// Include Ports and Labels columns for discovery and clickable URLs
+		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}'")
 		selected := cfg.SelectedAgent
 		printed := false
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			parts := strings.SplitN(line, "\t", 4)
+			parts := strings.SplitN(line, "\t", 5)
 			if len(parts) < 3 {
 				continue
 			}
@@ -45,7 +45,27 @@ var listCmd = &cobra.Command{
 			if len(parts) >= 4 {
 				portsField = parts[3]
 			}
-			if image != imgCfg.Tag {
+			labelsField := ""
+			if len(parts) >= 5 {
+				labelsField = parts[4]
+			}
+			// Determine if this container belongs to the selected image
+			belongs := false
+			if imgNameFromCfg, ok := cfg.ContainerImages[name]; ok && imgNameFromCfg == imgName {
+				belongs = true
+			}
+			if !belongs {
+				if labelMap := parseLabels(labelsField); labelMap["com.dv.owner"] == "dv" && labelMap["com.dv.image-name"] == imgName {
+					belongs = true
+				}
+			}
+			if !belongs {
+				// Legacy fallback: match by raw image tag
+				if image == imgCfg.Tag {
+					belongs = true
+				}
+			}
+			if !belongs {
 				continue
 			}
 			mark := " "
@@ -119,4 +139,31 @@ func parseHostPortURLs(portsField string) []string {
 		}
 	}
 	return urls
+}
+
+// parseLabels converts a docker --format {{.Labels}} string (comma-separated key=value pairs)
+// into a map for easy lookup. Malformed entries are ignored.
+func parseLabels(labelsField string) map[string]string {
+	labelsField = strings.TrimSpace(labelsField)
+	if labelsField == "" {
+		return map[string]string{}
+	}
+	items := strings.Split(labelsField, ",")
+	out := make(map[string]string, len(items))
+	for _, it := range items {
+		it = strings.TrimSpace(it)
+		if it == "" {
+			continue
+		}
+		kv := strings.SplitN(it, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		val := strings.TrimSpace(kv[1])
+		if key != "" {
+			out[key] = val
+		}
+	}
+	return out
 }
