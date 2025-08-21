@@ -98,11 +98,11 @@ Stop the selected or specified container.
 ./dv stop [--name NAME]
 ```
 
-### dv cleanup
+### dv remove
 Remove the container and optionally the image.
 
 ```bash
-./dv cleanup [--all] [--name NAME]
+./dv remove [--image] [--name NAME]
 ```
 
 ### Agent management

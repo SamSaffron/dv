@@ -18,7 +18,7 @@ This guide documents the repository purpose, key files, and operational guidelin
   - `start.go`: `dv start` creates or starts containers (no shell)
   - `enter.go`: `dv enter` opens a shell or runs commands inside the container
   - `stop.go`: `dv stop` stops containers
-  - `cleanup.go`: `dv cleanup` removes containers/images
+- `remove.go`: `dv remove` removes containers/images
   - `agent.go`: implements top-level `list`, `new`, `select`, `rename` agent commands
   - `extract.go`: `dv extract` copies container changes to local clone
   - `configcmd.go`: `dv config` manages persisted settings
@@ -66,7 +66,7 @@ Playwright preinstalled with dependencies; no extra setup needed.
 - Avoid long-lived background processes; use `dv enter` and exit cleanly
 - Don't modify `Dockerfile` without explicit instructions
 - `dv extract` resets local clone; commit host changes first
-- Use caution with `dv cleanup --all` as it removes the image
+- Use caution with `dv remove --image` as it removes the image
 
 ## Typical Workflows
 1. Build and start:

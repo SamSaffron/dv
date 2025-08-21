@@ -12,8 +12,10 @@ import (
 )
 
 var cleanupCmd = &cobra.Command{
-	Use:   "cleanup",
-	Short: "Remove container and optionally the image",
+	Use:        "remove",
+	Aliases:    []string{"cleanup"},
+	Short:      "Remove container and optionally its image",
+	Deprecated: "use 'dv remove' instead of 'dv cleanup'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -89,6 +91,6 @@ var cleanupCmd = &cobra.Command{
 }
 
 func init() {
-	cleanupCmd.Flags().Bool("all", false, "Also remove the Docker image after removing container")
+	cleanupCmd.Flags().Bool("image", false, "Also remove the Docker image after removing container")
 	cleanupCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
 }
