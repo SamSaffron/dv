@@ -28,18 +28,23 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
-		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'")
+		// Include Ports column to display published host ports for click-through URLs
+		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'")
 		selected := cfg.SelectedAgent
 		printed := false
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			parts := strings.SplitN(line, "\t", 3)
+			parts := strings.SplitN(line, "\t", 4)
 			if len(parts) < 3 {
 				continue
 			}
 			name, image, status := parts[0], parts[1], parts[2]
+			portsField := ""
+			if len(parts) >= 4 {
+				portsField = parts[3]
+			}
 			if image != imgCfg.Tag {
 				continue
 			}
@@ -47,7 +52,13 @@ var listCmd = &cobra.Command{
 			if selected != "" && name == selected {
 				mark = "*"
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\t%s\n", mark, name, status)
+			// Derive clickable localhost URLs from published host ports
+			urls := parseHostPortURLs(portsField)
+			if len(urls) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\t%s\t%s\n", mark, name, status, strings.Join(urls, " "))
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\t%s\n", mark, name, status)
+			}
 			printed = true
 		}
 		if !printed {
@@ -61,4 +72,51 @@ var listCmd = &cobra.Command{
 		_ = imgName // not printed but kept for clarity
 		return nil
 	},
+}
+
+// parseHostPortURLs extracts host ports from a Docker "Ports" column value and
+// returns clickable http://localhost:<port> URLs.
+// Examples of input formats handled:
+//
+//	"0.0.0.0:4201->4200/tcp, :::4201->4200/tcp"
+//	"127.0.0.1:8080->8080/tcp"
+//	"4200/tcp" (no published ports)
+func parseHostPortURLs(portsField string) []string {
+	portsField = strings.TrimSpace(portsField)
+	if portsField == "" {
+		return nil
+	}
+	// Multiple mappings separated by commas
+	segments := strings.Split(portsField, ",")
+	var urls []string
+	seen := map[string]struct{}{}
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		// Look for the left side before "->" which contains host ip:port
+		arrowIdx := strings.Index(seg, "->")
+		if arrowIdx == -1 {
+			// Not a published mapping (e.g., "4200/tcp")
+			continue
+		}
+		left := strings.TrimSpace(seg[:arrowIdx])
+		// left may be like "0.0.0.0:4201" or ":::4201" or "127.0.0.1:4201"
+		colonIdx := strings.LastIndex(left, ":")
+		if colonIdx == -1 || colonIdx+1 >= len(left) {
+			continue
+		}
+		hostPort := left[colonIdx+1:]
+		// Basic numeric validation
+		if hostPort == "" {
+			continue
+		}
+		url := "http://localhost:" + hostPort
+		if _, ok := seen[url]; !ok {
+			seen[url] = struct{}{}
+			urls = append(urls, url)
+		}
+	}
+	return urls
 }
