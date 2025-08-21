@@ -33,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(enterCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(removeCmd)
+	rootCmd.AddCommand(tuiCmd)
 	// Top-level agent management commands
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(newCmd)
