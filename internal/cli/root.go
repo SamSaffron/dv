@@ -12,6 +12,9 @@ var rootCmd = &cobra.Command{
 	Short:         "Discourse Vibe: manage local Discourse dev containers",
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	},
 }
 
 func Execute() error {
