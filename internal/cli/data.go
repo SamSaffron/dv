@@ -13,7 +13,9 @@ var dataCmd = &cobra.Command{
 	Short: "Show data directory path",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := xdg.DataDir()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), dir)
 		return nil
 	},

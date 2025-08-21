@@ -1,12 +1,12 @@
 package docker
 
 import (
-    "bytes"
-    "fmt"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "strings"
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 )
 
 func Exists(name string) bool {
@@ -32,28 +32,28 @@ func Remove(name string) error {
 }
 
 func Build(tag string, args []string) error {
-    argv := []string{"build", "-t", tag}
-    argv = append(argv, args...)
-    argv = append(argv, ".")
-    cmd := exec.Command("docker", argv...)
-    cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-    return cmd.Run()
+	argv := []string{"build", "-t", tag}
+	argv = append(argv, args...)
+	argv = append(argv, ".")
+	cmd := exec.Command("docker", argv...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 // BuildFrom builds a Docker image from a specific Dockerfile and context
 // directory. dockerfilePath may be absolute or relative; contextDir must be
 // a directory. Additional docker build arguments can be supplied via args.
 func BuildFrom(tag, dockerfilePath, contextDir string, args []string) error {
-    if !filepath.IsAbs(dockerfilePath) {
-        // ensure relative dockerfile path is evaluated relative to contextDir
-        dockerfilePath = filepath.Join(contextDir, dockerfilePath)
-    }
-    argv := []string{"build", "-t", tag, "-f", dockerfilePath}
-    argv = append(argv, args...)
-    argv = append(argv, contextDir)
-    cmd := exec.Command("docker", argv...)
-    cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-    return cmd.Run()
+	if !filepath.IsAbs(dockerfilePath) {
+		// ensure relative dockerfile path is evaluated relative to contextDir
+		dockerfilePath = filepath.Join(contextDir, dockerfilePath)
+	}
+	argv := []string{"build", "-t", tag, "-f", dockerfilePath}
+	argv = append(argv, args...)
+	argv = append(argv, contextDir)
+	cmd := exec.Command("docker", argv...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 func ImageExists(tag string) bool {

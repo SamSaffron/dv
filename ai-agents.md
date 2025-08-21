@@ -45,6 +45,17 @@ This guide documents the repository purpose, key files, and operational guidelin
 - Export changes with `dv extract`, then commit in `${XDG_DATA_HOME}/dv/discourse_src`
 - If host port conflicts, use `--host-port` or stop conflicting service
 
+### Go code hygiene
+- After editing any Go files, **format code and order imports**:
+  ```bash
+  gofmt -s -w .
+  goimports -w .
+  ```
+  If `goimports` is not installed:
+  ```bash
+  go install golang.org/x/tools/cmd/goimports@latest
+  ```
+
 ## Environment Variables
 Auto-passed to container when set on host: `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`. `CI=1` always set.
 

@@ -28,13 +28,13 @@ func getenv(keys ...string) []string {
 // resolveImage returns the image name and config, given an optional override name.
 // If override is empty, the currently selected image is used.
 func resolveImage(cfg config.Config, override string) (string, config.ImageConfig, error) {
-    name := override
-    if name == "" {
-        name = cfg.SelectedImage
-    }
-    img, ok := cfg.Images[name]
-    if !ok {
-        return "", config.ImageConfig{}, fmt.Errorf("unknown image '%s'", name)
-    }
-    return name, img, nil
+	name := override
+	if name == "" {
+		name = cfg.SelectedImage
+	}
+	img, ok := cfg.Images[name]
+	if !ok {
+		return "", config.ImageConfig{}, fmt.Errorf("unknown image '%s'", name)
+	}
+	return name, img, nil
 }

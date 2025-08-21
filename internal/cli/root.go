@@ -8,8 +8,8 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "dv",
-	Short: "Discourse Vibe: manage local Discourse dev containers",
+	Use:           "dv",
+	Short:         "Discourse Vibe: manage local Discourse dev containers",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -33,7 +33,7 @@ func init() {
 	rootCmd.AddCommand(extractCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(dataCmd)
-    rootCmd.AddCommand(imageCmd)
+	rootCmd.AddCommand(imageCmd)
 }
 
 func exitIfErr(err error) {

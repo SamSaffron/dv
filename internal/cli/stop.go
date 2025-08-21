@@ -15,12 +15,18 @@ var stopCmd = &cobra.Command{
 	Short: "Stop the container",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		cfg, err := config.LoadOrCreate(configDir)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 
 		name, _ := cmd.Flags().GetString("name")
-		if name == "" { name = currentAgentName(cfg) }
+		if name == "" {
+			name = currentAgentName(cfg)
+		}
 
 		if !docker.Exists(name) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Container '%s' does not exist\n", name)

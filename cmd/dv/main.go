@@ -1,8 +1,8 @@
 package main
 
 import (
-	"log"
 	"dv/internal/cli"
+	"log"
 )
 
 func main() {

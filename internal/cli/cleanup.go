@@ -15,13 +15,19 @@ var cleanupCmd = &cobra.Command{
 	Short: "Remove container and optionally the image",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		cfg, err := config.LoadOrCreate(configDir)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 
 		removeImage, _ := cmd.Flags().GetBool("all")
 		name, _ := cmd.Flags().GetString("name")
-		if name == "" { name = currentAgentName(cfg) }
+		if name == "" {
+			name = currentAgentName(cfg)
+		}
 
 		if docker.Exists(name) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Stopping and removing container '%s'...\n", name)

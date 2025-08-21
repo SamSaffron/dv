@@ -21,12 +21,18 @@ var configGetCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		cfg, err := config.LoadOrCreate(configDir)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		key := args[0]
 		val, err := getConfigField(cfg, key)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), val)
 		return nil
 	},
@@ -38,11 +44,17 @@ var configSetCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		cfg, err := config.LoadOrCreate(configDir)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		key, value := args[0], args[1]
-		if err := setConfigField(&cfg, key, value); err != nil { return err }
+		if err := setConfigField(&cfg, key, value); err != nil {
+			return err
+		}
 		return config.Save(configDir, cfg)
 	},
 }
@@ -52,9 +64,13 @@ var configShowCmd = &cobra.Command{
 	Short: "Show full config JSON",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		cfg, err := config.LoadOrCreate(configDir)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		b, _ := json.MarshalIndent(cfg, "", "  ")
 		fmt.Fprintln(cmd.OutOrStdout(), string(b))
 		return nil
@@ -75,8 +91,8 @@ func getConfigField(cfg config.Config, key string) (string, error) {
 		return cfg.DefaultContainer, nil
 	case "workdir":
 		return cfg.Workdir, nil
-    case "hostStartingPort":
-        return fmt.Sprint(cfg.HostStartingPort), nil
+	case "hostStartingPort":
+		return fmt.Sprint(cfg.HostStartingPort), nil
 	case "containerPort":
 		return fmt.Sprint(cfg.ContainerPort), nil
 	case "selectedAgent":
@@ -98,15 +114,19 @@ func setConfigField(cfg *config.Config, key, val string) error {
 		cfg.DefaultContainer = val
 	case "workdir":
 		cfg.Workdir = val
-    case "hostStartingPort":
+	case "hostStartingPort":
 		var v int
 		_, err := fmt.Sscanf(val, "%d", &v)
-		if err != nil { return err }
-        cfg.HostStartingPort = v
+		if err != nil {
+			return err
+		}
+		cfg.HostStartingPort = v
 	case "containerPort":
 		var v int
 		_, err := fmt.Sscanf(val, "%d", &v)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		cfg.ContainerPort = v
 	case "selectedAgent":
 		cfg.SelectedAgent = val
