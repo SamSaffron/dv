@@ -87,7 +87,7 @@ var completionBashCmd = &cobra.Command{
 		if bashInstall {
 			return installBashCompletion(cmd)
 		}
-		// Prefer V2 which avoids deprecated bashcompinit requirements
+		// Use V2 which avoids bashcompinit requirements
 		return rootCmd.GenBashCompletionV2(cmd.OutOrStdout(), true)
 	},
 }

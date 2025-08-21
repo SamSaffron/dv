@@ -4,8 +4,15 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	"dv/internal/config"
+	"dv/internal/docker"
+	"dv/internal/xdg"
 )
 
 func currentAgentName(cfg config.Config) string {
@@ -48,4 +55,98 @@ func isPortInUse(port int) bool {
 	}
 	_ = l.Close()
 	return false
+}
+
+// completeAgentNames suggests existing container names for the selected image.
+func completeAgentNames(cmd *cobra.Command, toComplete string) ([]string, cobra.ShellCompDirective) {
+	configDir, err := xdg.ConfigDir()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cfg, err := config.LoadOrCreate(configDir)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	_, imgCfg, err := resolveImage(cfg, "")
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}'")
+	var suggestions []string
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		name, image := parts[0], parts[1]
+		if image != imgCfg.Tag {
+			continue
+		}
+		if prefix == "" || strings.HasPrefix(strings.ToLower(name), prefix) {
+			suggestions = append(suggestions, name)
+		}
+	}
+	return suggestions, cobra.ShellCompDirectiveNoFileComp
+}
+
+func autogenName() string {
+	return fmt.Sprintf("ai_agent_%s", time.Now().Format("20060102-150405"))
+}
+
+func runShell(script string) (string, error) {
+	return execCombined("bash", "-lc", script)
+}
+
+func execCombined(name string, arg ...string) (string, error) {
+	cmd := execCommand(name, arg...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+var execCommand = defaultExec
+
+// indirection for testing
+func defaultExec(name string, arg ...string) *exec.Cmd { return exec.Command(name, arg...) }
+
+func containerImage(name string) (string, error) {
+	out, err := runShell(fmt.Sprintf("docker inspect -f '{{.Config.Image}}' %s 2>/dev/null || true", name))
+	return strings.TrimSpace(out), err
+}
+
+func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, reset bool) error {
+	// Fallback: if container has a recorded image, use that; else use selected image
+	imgName := cfg.ContainerImages[name]
+	_, imgCfg, err := resolveImage(cfg, imgName)
+	if err != nil {
+		return err
+	}
+	workdir := imgCfg.Workdir
+	imageTag := imgCfg.Tag
+	return ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, reset)
+}
+
+func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, name string, workdir string, imageTag string, reset bool) error {
+	if reset && docker.Exists(name) {
+		_ = docker.Stop(name)
+		_ = docker.Remove(name)
+	}
+	if !docker.Exists(name) {
+		// Choose the first available port starting from configured starting port
+		chosenPort := cfg.HostStartingPort
+		for isPortInUse(chosenPort) {
+			chosenPort++
+		}
+		if err := docker.RunDetached(name, workdir, imageTag, chosenPort, cfg.ContainerPort); err != nil {
+			return err
+		}
+	} else if !docker.Running(name) {
+		if err := docker.Start(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }

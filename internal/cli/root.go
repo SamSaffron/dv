@@ -29,17 +29,15 @@ func init() {
 	addPersistentFlags(rootCmd)
 
 	rootCmd.AddCommand(buildCmd)
-	// run command is deprecated in favor of start + enter
-	// rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(enterCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(removeCmd)
 	// Top-level agent management commands
-	rootCmd.AddCommand(agentListTopCmd)
-	rootCmd.AddCommand(agentNewTopCmd)
-	rootCmd.AddCommand(agentSelectTopCmd)
-	rootCmd.AddCommand(agentRenameTopCmd)
+	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(newCmd)
+	rootCmd.AddCommand(selectCmd)
+	rootCmd.AddCommand(renameCmd)
 	rootCmd.AddCommand(extractCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(dataCmd)
