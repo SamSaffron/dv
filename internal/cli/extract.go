@@ -45,7 +45,7 @@ var extractCmd = &cobra.Command{
 		}
 
 		if !docker.Running(name) {
-			return fmt.Errorf("container '%s' is not running; run 'dv run' first", name)
+			return fmt.Errorf("container '%s' is not running; run 'dv start' first", name)
 		}
 
 		// Determine image associated with this container, falling back to selected image

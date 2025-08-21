@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"net"
 	"os"
 
 	"dv/internal/config"
@@ -37,4 +38,14 @@ func resolveImage(cfg config.Config, override string) (string, config.ImageConfi
 		return "", config.ImageConfig{}, fmt.Errorf("unknown image '%s'", name)
 	}
 	return name, img, nil
+}
+
+// isPortInUse returns true when the given TCP port cannot be bound on localhost.
+func isPortInUse(port int) bool {
+	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return true
+	}
+	_ = l.Close()
+	return false
 }

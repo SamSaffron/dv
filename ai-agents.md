@@ -15,7 +15,8 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `cmd/dv/`: CLI entrypoint
 - `internal/cli/`: Subcommand implementations
   - `build.go`: `dv build` builds Docker image
-  - `run.go`: `dv run` creates/starts containers with shell/command access
+  - `start.go`: `dv start` creates or starts containers (no shell)
+  - `enter.go`: `dv enter` opens a shell or runs commands inside the container
   - `stop.go`: `dv stop` stops containers
   - `cleanup.go`: `dv cleanup` removes containers/images
   - `agent.go`: `dv agent` manages multiple containers
@@ -37,10 +38,10 @@ This guide documents the repository purpose, key files, and operational guidelin
 
 ## Operational Guidelines
 - Use `dv` instead of `bin/*` scripts
-- Verify image exists (`dv build`) and container runs (`dv run`) before work
+- Verify image exists (`dv build`) and container is started (`dv start`) before work
 - Run container commands with:
-  - `dv run -- <command>` (non-interactive)
-  - `dv run` (interactive shell)
+  - `dv enter -- <command>` (non-interactive)
+  - `dv enter` (interactive shell)
 - Manage containers via `dv agent new|select|list`
 - Export changes with `dv extract`, then commit in `${XDG_DATA_HOME}/dv/discourse_src`
 - If host port conflicts, use `--host-port` or stop conflicting service
@@ -62,7 +63,7 @@ Auto-passed to container when set on host: `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`
 Playwright preinstalled with dependencies; no extra setup needed.
 
 ## Safety Constraints
-- Avoid long-lived background processes; use `dv run` and exit cleanly
+- Avoid long-lived background processes; use `dv enter` and exit cleanly
 - Don't modify `Dockerfile` without explicit instructions
 - `dv extract` resets local clone; commit host changes first
 - Use caution with `dv cleanup --all` as it removes the image
@@ -71,7 +72,8 @@ Playwright preinstalled with dependencies; no extra setup needed.
 1. Build and start:
    ```bash
    ./dv build
-   ./dv run
+   ./dv start
+   ./dv enter
    ```
 
 2. Container operations:
@@ -98,6 +100,6 @@ Playwright preinstalled with dependencies; no extra setup needed.
 
 ## Troubleshooting
 - Port conflict: use `--host-port` or stop conflicting service
-- Missing port mapping: recreate with `dv run --reset`
+- Missing port mapping: recreate with `dv start --reset`
 - No changes detected: verify changes in `/var/www/discourse` and no container commits
 - Dockerfile confusion: run `dv build` to see which path was used

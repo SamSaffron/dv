@@ -30,12 +30,17 @@ This project provides a containerized development environment that includes:
    ./dv build
    ```
 
-3. Run the container and enter a shell:
+3. Start the container:
    ```bash
-   ./dv run
+   ./dv start
    ```
-
-4. Extract changes from the container (when ready to create a PR):
+4. Enter the container (interactive shell or run a command):
+   ```bash
+   ./dv enter
+   # or to run a one-off command
+   ./dv enter -- bin/rails c
+   ```
+5. Extract changes from the container (when ready to create a PR):
    ```bash
    ./dv extract
    ```
@@ -64,17 +69,26 @@ Notes:
   3) Embedded default (materialized to `${XDG_CONFIG_HOME}/dv/Dockerfile`)
   The command prints which Dockerfile path it used.
 
-### dv run
-Create/start the container and attach as user `discourse` in `/var/www/discourse`.
+### dv start
+Create or start the container for the selected image (no shell).
 
 ```bash
-./dv run [--reset] [--name NAME] [--host-port N] [--container-port N] [-- cmd ...]
+./dv start [--reset] [--name NAME] [--image NAME] [--host-starting-port N] [--container-port N]
 ```
 
 Notes:
 - Maps host `4201` → container `4200` by default (Ember CLI dev server). Override with flags.
+- Performs a pre-flight check and picks the next free port if needed.
+
+### dv enter
+Attach to the running container as user `discourse` in `/var/www/discourse`, or run a one-off command.
+
+```bash
+./dv enter [--name NAME] [-- cmd ...]
+```
+
+Notes:
 - Always sets `CI=1` and passes through common API keys from your environment.
-- Performs a pre-flight check and fails fast if the requested host port is already in use.
 
 ### dv stop
 Stop the selected or specified container.
@@ -186,7 +200,8 @@ The image is based on `discourse/discourse_dev:release` and includes:
    ```
 2. Develop inside the container:
    ```bash
-   ./dv run
+   ./dv start
+   ./dv enter
    # Work with Discourse at /var/www/discourse
    ```
 3. Extract changes to a local clone and commit:

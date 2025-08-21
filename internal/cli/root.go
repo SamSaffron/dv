@@ -26,7 +26,10 @@ func init() {
 	addPersistentFlags(rootCmd)
 
 	rootCmd.AddCommand(buildCmd)
-	rootCmd.AddCommand(runCmd)
+	// run command is deprecated in favor of start + enter
+	// rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(startCmd)
+	rootCmd.AddCommand(enterCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(cleanupCmd)
 	rootCmd.AddCommand(agentCmd)
