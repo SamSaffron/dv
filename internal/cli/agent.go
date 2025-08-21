@@ -13,10 +13,7 @@ import (
 	"dv/internal/xdg"
 )
 
-var agentCmd = &cobra.Command{
-	Use:   "agent",
-	Short: "Manage multiple agent containers",
-}
+// Legacy 'dv agent' command removed in favor of top-level commands.
 
 var agentListCmd = &cobra.Command{
 	Use:   "list",
@@ -148,10 +145,8 @@ var agentSelectCmd = &cobra.Command{
 }
 
 func init() {
-	agentCmd.AddCommand(agentListCmd)
-	agentCmd.AddCommand(agentNewCmd)
-	agentNewCmd.Flags().String("image", "", "Image to use (defaults to selected image)")
-	agentCmd.AddCommand(agentSelectCmd)
+	// Bind flags for top-level 'new'
+	agentNewTopCmd.Flags().String("image", "", "Image to use (defaults to selected image)")
 }
 
 // Top-level convenience commands: `dv list`, `dv new`, `dv select`, `dv rename`
@@ -172,13 +167,27 @@ var agentSelectTopCmd = &cobra.Command{
 	Use:   "select NAME",
 	Short: "Select an agent (alias for 'agent select')",
 	Args:  agentSelectCmd.Args,
-	RunE:  agentSelectCmd.RunE,
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Complete NAME
+		if len(args) == 0 {
+			return completeAgentNames(cmd, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
+	RunE: agentSelectCmd.RunE,
 }
 
 var agentRenameTopCmd = &cobra.Command{
 	Use:   "rename OLD NEW",
 	Short: "Rename an existing agent container",
 	Args:  cobra.ExactArgs(2),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Complete OLD when providing the first arg, NEW is free text
+		if len(args) == 0 {
+			return completeAgentNames(cmd, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		oldName := strings.TrimSpace(args[0])
 		newName := strings.TrimSpace(args[1])
@@ -218,6 +227,42 @@ var agentRenameTopCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Renamed agent '%s' -> '%s'\n", oldName, newName)
 		return nil
 	},
+}
+
+// completeAgentNames suggests existing container names for the selected image.
+func completeAgentNames(cmd *cobra.Command, toComplete string) ([]string, cobra.ShellCompDirective) {
+	configDir, err := xdg.ConfigDir()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	cfg, err := config.LoadOrCreate(configDir)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	_, imgCfg, err := resolveImage(cfg, "")
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}'")
+	var suggestions []string
+	prefix := strings.ToLower(strings.TrimSpace(toComplete))
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		name, image := parts[0], parts[1]
+		if image != imgCfg.Tag {
+			continue
+		}
+		if prefix == "" || strings.HasPrefix(strings.ToLower(name), prefix) {
+			suggestions = append(suggestions, name)
+		}
+	}
+	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
 func autogenName() string {

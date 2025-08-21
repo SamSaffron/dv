@@ -106,7 +106,7 @@ Remove the container and optionally the image.
 ```
 
 ### Agent management
-Manage multiple containers for the selected image; selection is stored in XDG config.
+Manage multiple containers for the selected image; selection is stored in XDG config. These are the preferred top-level commands; the old `dv agent` group has been removed.
 
 ```bash
 ./dv list

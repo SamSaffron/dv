@@ -19,7 +19,7 @@ This guide documents the repository purpose, key files, and operational guidelin
   - `enter.go`: `dv enter` opens a shell or runs commands inside the container
   - `stop.go`: `dv stop` stops containers
   - `cleanup.go`: `dv cleanup` removes containers/images
-  - `agent.go`: `dv agent` manages multiple containers; also top-level aliases `list`, `new`, `select`, `rename`
+  - `agent.go`: implements top-level `list`, `new`, `select`, `rename` agent commands
   - `extract.go`: `dv extract` copies container changes to local clone
   - `configcmd.go`: `dv config` manages persisted settings
   - `data.go`: Shows XDG data directory path
@@ -42,7 +42,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 - Run container commands with:
   - `dv enter -- <command>` (non-interactive)
   - `dv enter` (interactive shell)
-- Manage containers via `dv new|select|list|rename` (or `dv agent ...`)
+- Manage containers via `dv new|select|list|rename`
 - Export changes with `dv extract`, then commit in `${XDG_DATA_HOME}/dv/discourse_src`
 - If host port conflicts, use `--host-port` or stop conflicting service
 

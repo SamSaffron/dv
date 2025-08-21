@@ -32,8 +32,7 @@ func init() {
 	rootCmd.AddCommand(enterCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(cleanupCmd)
-	rootCmd.AddCommand(agentCmd)
-	// Top-level aliases for agent management
+	// Top-level agent management commands
 	rootCmd.AddCommand(agentListTopCmd)
 	rootCmd.AddCommand(agentNewTopCmd)
 	rootCmd.AddCommand(agentSelectTopCmd)
