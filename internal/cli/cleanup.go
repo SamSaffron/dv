@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -43,6 +44,42 @@ var cleanupCmd = &cobra.Command{
 				_ = docker.RemoveImage(cfg.ImageTag)
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "Image '%s' does not exist\n", cfg.ImageTag)
+			}
+		}
+
+		// If we removed the selected agent, choose the first remaining container for the selected image
+		if cfg.SelectedAgent == name {
+			// Determine image to filter by: prefer the container's recorded image, else the currently selected image
+			imgName := cfg.ContainerImages[name]
+			_, imgCfg, err := resolveImage(cfg, imgName)
+			if err != nil {
+				// Fallback to selected image silently
+				_, imgCfg, _ = resolveImage(cfg, "")
+			}
+
+			out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}'")
+			var first string
+			for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				parts := strings.SplitN(line, "\t", 2)
+				if len(parts) < 2 {
+					continue
+				}
+				n, image := parts[0], parts[1]
+				if image != imgCfg.Tag {
+					continue
+				}
+				first = n
+				break
+			}
+			cfg.SelectedAgent = first
+			_ = config.Save(configDir, cfg)
+			if first != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Selected agent: %s\n", first)
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "Selected agent: (none)")
 			}
 		}
 
