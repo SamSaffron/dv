@@ -23,7 +23,7 @@ This guide documents the repository purpose, key files, and operational guidelin
   - `extract.go`: `dv extract` copies container changes to local clone
   - `configcmd.go`: `dv config` manages persisted settings
   - `data.go`: Shows XDG data directory path
-  - `completion.go`: `dv completion` manages shell completions
+- `completion.go`: `dv config completion` manages shell completions
 - `internal/config/`: JSON configuration management
 - `internal/docker/`: Docker CLI wrappers
 - `internal/xdg/`: XDG path helpers

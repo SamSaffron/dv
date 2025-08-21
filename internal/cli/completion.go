@@ -12,7 +12,7 @@ import (
 var completionCmd = &cobra.Command{
 	Use:   "completion",
 	Short: "Generate shell completion scripts",
-	Long:  "Generate shell completion scripts for dv. Use 'dv completion zsh' to print the zsh completion script.",
+	Long:  "Generate shell completion scripts for dv. Use 'dv config completion zsh' to print the zsh completion script.",
 }
 
 var (
@@ -43,7 +43,8 @@ func init() {
 	// Bash completion subcommand
 	completionBashCmd.Flags().BoolVar(&bashInstall, "install", false, "Install completion into ~/.local/share/bash-completion/completions/dv")
 	completionCmd.AddCommand(completionBashCmd)
-	rootCmd.AddCommand(completionCmd)
+	// Move completion under config
+	configCmd.AddCommand(completionCmd)
 }
 
 func installZshCompletion(cmd *cobra.Command) error {

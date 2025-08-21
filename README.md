@@ -140,12 +140,12 @@ Print the data directory path (`${XDG_DATA_HOME}/dv`).
 ./dv data
 ```
 
-### dv completion
-Generate shell completion scripts. For zsh:
+### dv config completion
+Generate shell completion scripts (rarely needed). For zsh:
 
 ```bash
-./dv completion zsh           # print to stdout
-./dv completion zsh --install # install to ~/.local/share/zsh/site-functions/_dv
+./dv config completion zsh           # print to stdout
+./dv config completion zsh --install # install to ~/.local/share/zsh/site-functions/_dv
 ```
 
 ## Environment Variables
