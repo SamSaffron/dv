@@ -35,6 +35,12 @@ type Config struct {
 	Images map[string]ImageConfig `json:"images"`
 	// ContainerImages maps container name -> image name for provenance
 	ContainerImages map[string]string `json:"containerImages"`
+
+	// CopyFiles maps host source paths to container destination paths that
+	// should be copied into the container at `dv enter` time. Host paths may
+	// include `~` for home and environment variables; they are expanded at
+	// runtime. Keys are host paths, values are container paths.
+	CopyFiles map[string]string `json:"copyFiles"`
 }
 
 // ImageSource describes how to obtain the Dockerfile for an image.
@@ -93,6 +99,9 @@ func Default() Config {
 			},
 		},
 		ContainerImages: map[string]string{},
+		CopyFiles: map[string]string{
+			"~/.codex/auth.json": "/home/discourse/.codex/auth.json",
+		},
 	}
 }
 
@@ -145,6 +154,11 @@ func LoadOrCreate(configDir string) (Config, error) {
 	}
 	if cfg.ContainerImages == nil {
 		cfg.ContainerImages = map[string]string{}
+	}
+	if cfg.CopyFiles == nil {
+		cfg.CopyFiles = map[string]string{
+			"~/.codex/auth.json": "/home/discourse/.codex/auth.json",
+		}
 	}
 	return cfg, nil
 }

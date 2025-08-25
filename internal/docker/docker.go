@@ -119,6 +119,16 @@ func ExecOutput(name, workdir string, argv []string) (string, error) {
 	return string(out), err
 }
 
+// ExecAsRoot runs a command inside the container as root, returning combined output.
+func ExecAsRoot(name, workdir string, argv []string) (string, error) {
+	args := []string{"exec", "--user", "root", "-w", workdir}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func CopyFromContainer(name, srcInContainer, dstOnHost string) error {
 	cmd := exec.Command("docker", "cp", fmt.Sprintf("%s:%s", name, srcInContainer), dstOnHost)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -54,6 +56,29 @@ var enterCmd = &cobra.Command{
 		}
 		workdir := imgCfg.Workdir
 
+		// Before entering, copy any configured files into the container
+		for hostSrc, containerDst := range cfg.CopyFiles {
+			hostPath := expandHostPath(hostSrc)
+			if hostPath == "" {
+				continue
+			}
+			if st, err := os.Stat(hostPath); err != nil || !st.Mode().IsRegular() {
+				// Skip missing or non-regular files
+				fmt.Fprintf(cmd.ErrOrStderr(), "Skipping copy (not found): %s -> %s\n", hostPath, containerDst)
+				continue
+			}
+			// Ensure destination directory exists inside container (as discourse user)
+			dstDir := filepath.Dir(containerDst)
+			_, _ = docker.ExecOutput(name, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
+			// Copy file
+			if err := docker.CopyToContainer(name, hostPath, containerDst); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hostPath, containerDst, err)
+				continue
+			}
+			// Ensure ownership so 'discourse' can read
+			_, _ = docker.ExecAsRoot(name, workdir, []string{"chown", "discourse:discourse", containerDst})
+		}
+
 		// Prepare env pass-through
 		envs := make([]string, 0, len(cfg.EnvPassthrough)+1)
 		envs = append(envs, "CI=1")
@@ -76,6 +101,30 @@ var enterCmd = &cobra.Command{
 
 		return docker.ExecInteractive(name, workdir, envs, execArgs)
 	},
+}
+
+// expandHostPath expands a host path allowing ~ and environment variables.
+func expandHostPath(p string) string {
+	if strings.HasPrefix(p, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if p == "~" {
+				p = home
+			} else if strings.HasPrefix(p, "~/") {
+				p = filepath.Join(home, p[2:])
+			}
+		}
+	}
+	p = os.ExpandEnv(p)
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return abs
+}
+
+// shellQuote returns a single-quoted shell-safe string.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func init() {

@@ -90,6 +90,7 @@ Attach to the running container as user `discourse` in `/var/www/discourse`, or 
 
 Notes:
 - Always sets `CI=1` and passes through common API keys from your environment.
+- Copies any configured host files into the container before launching the shell (see `copyFiles` under config).
 
 ### dv stop
 Stop the selected or specified container.
@@ -132,6 +133,18 @@ Read/write config stored at `${XDG_CONFIG_HOME}/dv/config.json`.
 ./dv config set KEY VALUE
 ./dv config show
 ```
+
+#### Copying host files on enter
+Configure files to copy from the host into the container every time you run `dv enter` by setting `copyFiles` in your config. Keys are host paths (supporting `~` and env vars), values are absolute container paths. A sensible default is provided for Codex auth:
+
+```json
+{
+  "copyFiles": {
+    "~/.codex/auth.json": "/home/discourse/.codex/auth.json"
+  }
+}
+```
+The parent directory inside the container is created if needed, and ownership is set to `discourse:discourse` so the file is readable by the working user.
 
 ### dv data
 Print the data directory path (`${XDG_DATA_HOME}/dv`).
@@ -212,4 +225,3 @@ The image is based on `discourse/discourse_dev:release` and includes:
    cd $(./dv data)/discourse_src
    git add . && git commit -m "Your message"
    ```
-
