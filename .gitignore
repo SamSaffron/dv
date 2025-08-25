@@ -1,3 +1,4 @@
 # Local discourse repo for PR creation
 dv
 .gocache/*
+.cursor/mcp.json
