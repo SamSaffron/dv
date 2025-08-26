@@ -3,6 +3,7 @@ FROM discourse/discourse_dev:release
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="~/.local/bin:$PATH"
 
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends vim ripgrep
