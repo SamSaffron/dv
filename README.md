@@ -222,3 +222,4 @@ The image is based on `discourse/discourse_dev:release` and includes:
    cd $(./dv data)/discourse_src
    git add . && git commit -m "Your message"
    ```
+
