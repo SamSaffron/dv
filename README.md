@@ -89,7 +89,6 @@ Attach to the running container as user `discourse` in `/var/www/discourse`, or 
 ```
 
 Notes:
-- Always sets `CI=1` and passes through common API keys from your environment.
 - Copies any configured host files into the container before launching the shell (see `copyFiles` under config).
 
 ### dv stop
@@ -173,8 +172,6 @@ Automatically passed through when set on the host:
 - `CLAUDE_CODE_USE_BEDROCK`
 - `DEEPSEEK_API_KEY`
 - `GEMINI_API_KEY`
-
-Additionally, `CI=1` is always set inside the container to ensure consistent test behavior.
 
 ## Container Details
 

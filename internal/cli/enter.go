@@ -81,7 +81,6 @@ var enterCmd = &cobra.Command{
 
 		// Prepare env pass-through
 		envs := make([]string, 0, len(cfg.EnvPassthrough)+1)
-		envs = append(envs, "CI=1")
 		for _, key := range cfg.EnvPassthrough {
 			if val, ok := os.LookupEnv(key); ok && val != "" {
 				envs = append(envs, key)
