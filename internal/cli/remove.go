@@ -12,8 +12,17 @@ import (
 )
 
 var removeCmd = &cobra.Command{
-	Use:   "remove",
-	Short: "Remove container and optionally its image",
+	Use:     "remove [NAME]",
+	Aliases: []string{"rm"},
+	Short:   "Remove container and optionally its image",
+	Args:    cobra.RangeArgs(0, 1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Complete NAME
+		if len(args) == 0 {
+			return completeAgentNames(cmd, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -26,6 +35,9 @@ var removeCmd = &cobra.Command{
 
 		removeImage, _ := cmd.Flags().GetBool("image")
 		name, _ := cmd.Flags().GetString("name")
+		if len(args) == 1 && strings.TrimSpace(args[0]) != "" {
+			name = args[0]
+		}
 		if name == "" {
 			name = currentAgentName(cfg)
 		}

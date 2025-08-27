@@ -11,8 +11,9 @@ import (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List containers created from the selected image",
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List containers created from the selected image",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
