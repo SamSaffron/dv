@@ -31,6 +31,7 @@ func init() {
 	rootCmd.AddCommand(buildCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(enterCmd)
+	rootCmd.AddCommand(runAgentCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(tuiCmd)

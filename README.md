@@ -91,6 +91,26 @@ Attach to the running container as user `discourse` in `/var/www/discourse`, or 
 Notes:
 - Copies any configured host files into the container before launching the shell (see `copyFiles` under config).
 
+### dv run-agent (alias: ra)
+Run an AI agent inside the container with a prompt.
+
+```bash
+./dv run-agent [--name NAME] AGENT [-- ARGS...|PROMPT ...]
+# alias
+./dv ra codex Write a migration to add foo to users
+
+# interactive mode
+./dv ra codex
+
+# pass raw args directly to the agent (no prompt wrapping)
+./dv ra aider -- --yes -m "Refactor widget"
+```
+
+Notes:
+- Autocompletes common agents: `codex`, `aider`, `claude`, `gemini`, `crush`, `cursor`, `opencode`.
+- If no prompt is provided, an inline TUI opens for multi-line input (Ctrl+D to run, Esc to cancel).
+- Agent invocation is rule-based (no runtime discovery). Use `--` to pass raw args unchanged (e.g., `./dv ra codex -- --help`).
+
 ### dv stop
 Stop the selected or specified container.
 

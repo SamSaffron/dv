@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 func Exists(name string) bool {
@@ -99,7 +101,11 @@ func RunDetached(name, workdir, image string, hostPort, containerPort int, label
 }
 
 func ExecInteractive(name, workdir string, envs []string, argv []string) error {
-	args := []string{"exec", "-it", "--user", "discourse", "-w", workdir}
+	args := []string{"exec", "-i", "--user", "discourse", "-w", workdir}
+	// Add -t only when stdout is a TTY
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		args = append([]string{"exec", "-t"}, args[1:]...)
+	}
 	for _, e := range envs {
 		args = append(args, "-e", e)
 	}
