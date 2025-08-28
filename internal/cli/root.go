@@ -28,6 +28,35 @@ func addPersistentFlags(cmd *cobra.Command) {
 func init() {
 	addPersistentFlags(rootCmd)
 
+	// Custom usage template that keeps the command list aligned by padding only the
+	// primary command name; aliases are shown after the description to avoid
+	// breaking column alignment.
+	rootCmd.SetUsageTemplate(`Usage:{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Aliases:
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
+
+Available Commands:
+{{range .Commands}}{{if .IsAvailableCommand}}
+  {{rpad .Name .NamePadding}} {{.Short}}{{if gt (len .Aliases) 0}} (aliases: {{.Aliases}}){{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:
+{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}`)
+
 	rootCmd.AddCommand(buildCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(enterCmd)
@@ -41,6 +70,7 @@ func init() {
 	rootCmd.AddCommand(selectCmd)
 	rootCmd.AddCommand(renameCmd)
 	rootCmd.AddCommand(extractCmd)
+	rootCmd.AddCommand(importCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(dataCmd)
 	rootCmd.AddCommand(imageCmd)
