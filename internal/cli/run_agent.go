@@ -193,8 +193,8 @@ func collectPromptInteractive(cmd *cobra.Command) (string, error) {
 func buildAgentArgs(agent string, prompt string) []string {
 	if rule, ok := agentRules[strings.ToLower(agent)]; ok {
 		base := rule.withPrompt(prompt)
-		if len(rule.bypass) > 0 {
-			base = injectBypass(base, rule.bypass)
+		if len(rule.defaults) > 0 {
+			base = injectDefaults(base, rule.defaults)
 		}
 		return base
 	}
@@ -204,19 +204,19 @@ func buildAgentArgs(agent string, prompt string) []string {
 func buildAgentInteractive(agent string) []string {
 	if rule, ok := agentRules[strings.ToLower(agent)]; ok {
 		base := rule.interactive()
-		if len(rule.bypass) > 0 {
-			base = injectBypass(base, rule.bypass)
+		if len(rule.defaults) > 0 {
+			base = injectDefaults(base, rule.defaults)
 		}
 		return base
 	}
 	return []string{agent}
 }
 
-func injectBypass(argv []string, bypass []string) []string {
-	if len(argv) == 0 || len(bypass) == 0 {
+func injectDefaults(argv []string, defaults []string) []string {
+	if len(argv) == 0 || len(defaults) == 0 {
 		return argv
 	}
-	out := make([]string, 0, len(argv)+len(bypass))
+	out := make([]string, 0, len(argv)+len(defaults))
 	out = append(out, argv[0])
 	// If the command has a subcommand as argv[1] (heuristic: not a flag), keep it before flags
 	startIdx := 1
@@ -224,7 +224,7 @@ func injectBypass(argv []string, bypass []string) []string {
 		out = append(out, argv[1])
 		startIdx = 2
 	}
-	out = append(out, bypass...)
+	out = append(out, defaults...)
 	out = append(out, argv[startIdx:]...)
 	return out
 }
@@ -233,45 +233,45 @@ func injectBypass(argv []string, bypass []string) []string {
 type agentRule struct {
 	interactive func() []string
 	withPrompt  func(prompt string) []string
-	bypass      []string
+	defaults    []string
 }
 
 var agentRules = map[string]agentRule{
 	// Cursor
 	"cursor": {
 		interactive: func() []string { return []string{"cursor-agent"} },
-		withPrompt:  func(p string) []string { return []string{"cursor-agent", "-fp", p} },
-		bypass:      []string{"-f"},
+		withPrompt:  func(p string) []string { return []string{"cursor-agent", "-p", p} },
+		defaults:    []string{"-f"},
 	},
 	// OpenAI Codex
 	"codex": {
 		interactive: func() []string { return []string{"codex"} },
 		withPrompt:  func(p string) []string { return []string{"codex", "exec", p} },
-		bypass:      []string{"--dangerously-bypass-approvals-and-sandbox"},
+		defaults:    []string{"--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high"},
 	},
 	// Aider
 	"aider": {
 		interactive: func() []string { return []string{"aider"} },
 		withPrompt:  func(p string) []string { return []string{"aider", "--message", p} },
-		bypass:      []string{"--yes-always"},
+		defaults:    []string{"--yes-always"},
 	},
 	// Claude CLI
 	"claude": {
 		interactive: func() []string { return []string{"claude"} },
 		withPrompt:  func(p string) []string { return []string{"claude", "-p", p} },
-		bypass:      []string{"--dangerously-skip-permissions"},
+		defaults:    []string{"--dangerously-skip-permissions"},
 	},
 	// Google Gemini CLI
 	"gemini": {
 		interactive: func() []string { return []string{"gemini"} },
 		withPrompt:  func(p string) []string { return []string{"gemini", "-p", p} },
-		bypass:      []string{"-y"},
+		defaults:    []string{"-y"},
 	},
 	// Crush
 	"crush": {
 		interactive: func() []string { return []string{"crush"} },
 		withPrompt:  func(p string) []string { return []string{"crush", "--prompt", p} },
-		bypass:      []string{},
+		defaults:    []string{},
 	},
 	// OpenCode
 	// opencode: disabled until verified in image
