@@ -98,5 +98,6 @@ EOF
 RUN chmod +x /etc/runit/3.d/02-ember-cli
 
 ENV LEFTHOOK=1
+ENV DISCOURSE_DEV_ALLOW_ANON_TO_IMPERSONATE=1
 
 ENTRYPOINT ["/sbin/boot"]
