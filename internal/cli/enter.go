@@ -15,7 +15,7 @@ import (
 
 var enterCmd = &cobra.Command{
 	Use:   "enter [--name NAME] [-- cmd ...]",
-	Short: "Enter the running container as user 'discourse' (or run a command)",
+	Short: "Enter the container as 'discourse' (use --root for root)",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
@@ -98,6 +98,11 @@ var enterCmd = &cobra.Command{
 			execArgs = args
 		}
 
+		// Determine whether to enter as root
+		asRoot, _ := cmd.Flags().GetBool("root")
+		if asRoot {
+			return docker.ExecInteractiveAsRoot(name, workdir, envs, execArgs)
+		}
 		return docker.ExecInteractive(name, workdir, envs, execArgs)
 	},
 }
@@ -128,4 +133,5 @@ func shellQuote(s string) string {
 
 func init() {
 	enterCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
+	enterCmd.Flags().Bool("root", false, "Enter as root user")
 }

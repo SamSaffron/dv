@@ -116,6 +116,23 @@ func ExecInteractive(name, workdir string, envs []string, argv []string) error {
 	return cmd.Run()
 }
 
+// ExecInteractiveAsRoot runs an interactive command inside the container as root.
+func ExecInteractiveAsRoot(name, workdir string, envs []string, argv []string) error {
+	args := []string{"exec", "-i", "--user", "root", "-w", workdir}
+	// Add -t only when stdout is a TTY
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		args = append([]string{"exec", "-t"}, args[1:]...)
+	}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.Command("docker", args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 func ExecOutput(name, workdir string, argv []string) (string, error) {
 	args := []string{"exec", "--user", "discourse", "-w", workdir}
 	args = append(args, name)
