@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -124,23 +123,75 @@ var extractCmd = &cobra.Command{
 			}
 		}
 
-		// Get container commit
+		// Get container commit and branch
 		commit, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git rev-parse HEAD"})
 		if err != nil {
 			return err
 		}
 		commit = strings.TrimSpace(commit)
-		fmt.Fprintf(logOut, "Container is at commit: %s\n", commit)
-
-		// Create an appropriate branch prefix based on container type
-		branchPrefix := cfg.ExtractBranchPrefix
-		if isTheme {
-			branchPrefix = "theme-changes"
-		}
-		branch := fmt.Sprintf("%s-%s", branchPrefix, time.Now().Format("20060102-150405"))
-		fmt.Fprintf(logOut, "Creating branch: %s\n", branch)
-		if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-b", branch, commit); err != nil {
+		containerBranch, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git rev-parse --abbrev-ref HEAD"})
+		if err != nil {
 			return err
+		}
+		containerBranch = strings.TrimSpace(containerBranch)
+		fmt.Fprintf(logOut, "Container is at commit: %s\n", commit)
+		if containerBranch != "" {
+			fmt.Fprintf(logOut, "Container branch: %s\n", containerBranch)
+		}
+
+		// Decide local checkout strategy based on availability of commit and container branch state
+		branchDisplay := ""
+		// Does the commit exist in the local clone (after fetch)?
+		commitExists := commitExistsInRepo(localRepo, commit)
+		if commitExists {
+			if containerBranch != "" && containerBranch != "HEAD" {
+				// Ensure the same branch is checked out and points at the container commit
+				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", containerBranch, commit); err != nil {
+					return err
+				}
+				branchDisplay = containerBranch
+			} else {
+				// Detached HEAD in container; do not create a branch when commit exists
+				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "--detach", commit); err != nil {
+					return err
+				}
+				branchDisplay = "HEAD (detached)"
+			}
+		} else {
+			// Commit is missing in outer repo; create a branch named after the agent
+			// Choose a reasonable base: origin/<containerBranch> if it exists, otherwise origin/main or origin/master
+			baseRef := ""
+			if containerBranch != "" && containerBranch != "HEAD" {
+				candidate := "origin/" + containerBranch
+				if refExists(localRepo, candidate) {
+					baseRef = candidate
+				}
+			}
+			if baseRef == "" {
+				if refExists(localRepo, "origin/main") {
+					baseRef = "origin/main"
+				} else if refExists(localRepo, "origin/master") {
+					baseRef = "origin/master"
+				} else {
+					// Fall back to origin/HEAD if available
+					if refExists(localRepo, "origin/HEAD") {
+						baseRef = "origin/HEAD"
+					}
+				}
+			}
+			// Create or reset the branch named after the agent
+			branchName := name
+			if baseRef != "" {
+				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName, baseRef); err != nil {
+					return err
+				}
+			} else {
+				// As a last resort, create the branch at current HEAD
+				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName); err != nil {
+					return err
+				}
+			}
+			branchDisplay = branchName
 		}
 
 		fmt.Fprintln(logOut, "Extracting changes from container...")
@@ -177,7 +228,9 @@ var extractCmd = &cobra.Command{
 		fmt.Fprintln(logOut, "")
 		fmt.Fprintln(logOut, "✅ Changes extracted successfully!")
 		fmt.Fprintf(logOut, "📁 Location: %s\n", localRepo)
-		fmt.Fprintf(logOut, "🌿 Branch: %s\n", branch)
+		if strings.TrimSpace(branchDisplay) != "" {
+			fmt.Fprintf(logOut, "🌿 Branch: %s\n", branchDisplay)
+		}
 		fmt.Fprintf(logOut, "📊 Files changed: %d\n", changedCount)
 		fmt.Fprintf(logOut, "🎯 Base commit: %s\n", commit)
 
@@ -216,6 +269,32 @@ func runInDir(dir string, stdout, stderr io.Writer, name string, args ...string)
 	c.Stdout, c.Stderr = stdout, stderr
 	c.Dir = dir
 	return c.Run()
+}
+
+// commitExistsInRepo returns true if the given commit SHA exists in the repo.
+func commitExistsInRepo(repoDir string, commit string) bool {
+	if strings.TrimSpace(commit) == "" {
+		return false
+	}
+	c := exec.Command("git", "cat-file", "-e", commit+"^{commit}")
+	c.Dir = repoDir
+	if err := c.Run(); err != nil {
+		return false
+	}
+	return true
+}
+
+// refExists returns true if the given ref (e.g., origin/main) resolves in the repo.
+func refExists(repoDir string, ref string) bool {
+	if strings.TrimSpace(ref) == "" {
+		return false
+	}
+	c := exec.Command("git", "rev-parse", "--verify", "--quiet", ref)
+	c.Dir = repoDir
+	if err := c.Run(); err != nil {
+		return false
+	}
+	return true
 }
 
 // makeCloneCandidates returns preferred clone URLs: SSH first if derivable, then original, then HTTPS fallbacks.
