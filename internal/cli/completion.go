@@ -216,10 +216,10 @@ func installZshCompletionSmart(cmd *cobra.Command) error {
 		}
 	}
 
-		// Check if dv completion is already configured
+	// Check if dv completion is already configured
 	dvCompletionMarker := "# dv completion setup"
 	hasDvCompletion := false
-	
+
 	for _, line := range existingLines {
 		if strings.Contains(line, dvCompletionMarker) {
 			hasDvCompletion = true
