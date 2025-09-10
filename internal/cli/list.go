@@ -32,7 +32,8 @@ var listCmd = &cobra.Command{
 		// Include Ports and Labels columns for discovery and clickable URLs
 		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}'")
 		selected := cfg.SelectedAgent
-		printed := false
+		var agents []agentInfo
+
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
@@ -69,26 +70,47 @@ var listCmd = &cobra.Command{
 			if !belongs {
 				continue
 			}
-			mark := " "
-			if selected != "" && name == selected {
-				mark = "*"
-			}
-			// Derive clickable localhost URLs from published host ports
+
+			// Parse status and time
+			statusText, timeText := parseStatus(status)
 			urls := parseHostPortURLs(portsField)
-			if len(urls) > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\t%s\t%s\n", mark, name, status, strings.Join(urls, " "))
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s %s\t%s\n", mark, name, status)
-			}
-			printed = true
+
+			agents = append(agents, agentInfo{
+				name:     name,
+				status:   statusText,
+				time:     timeText,
+				urls:     urls,
+				selected: selected != "" && name == selected,
+			})
 		}
-		if !printed {
+
+		// Print in ls -l style format
+		if len(agents) == 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "(no agents found for image '%s')\n", imgCfg.Tag)
-		}
-		if selected != "" {
-			fmt.Fprintf(cmd.OutOrStdout(), "Selected: %s\n", selected)
 		} else {
-			fmt.Fprintln(cmd.OutOrStdout(), "Selected: (none)")
+			// Calculate dynamic column width based on longest name
+			maxNameWidth := calculateMaxNameWidth(agents)
+
+			fmt.Fprintf(cmd.OutOrStdout(), "total %d\n", len(agents))
+			for _, agent := range agents {
+				mark := " "
+				if agent.selected {
+					mark = "*"
+				}
+				if len(agent.urls) > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s %-*s %-8s %-12s %s\n",
+						mark, maxNameWidth, agent.name, agent.status, agent.time, strings.Join(agent.urls, " "))
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s %-*s %-8s %-12s\n",
+						mark, maxNameWidth, agent.name, agent.status, agent.time)
+				}
+			}
+		}
+
+		if selected != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nSelected: %s\n", selected)
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "\nSelected: (none)")
 		}
 		_ = imgName // not printed but kept for clarity
 		return nil
@@ -167,4 +189,64 @@ func parseLabels(labelsField string) map[string]string {
 		}
 	}
 	return out
+}
+
+// agentInfo holds information about a container for formatted display
+type agentInfo struct {
+	name     string
+	status   string
+	time     string
+	urls     []string
+	selected bool
+}
+
+// calculateMaxNameWidth finds the longest agent name and returns an appropriate column width
+// with reasonable limits (minimum 10, maximum 50 characters)
+func calculateMaxNameWidth(agents []agentInfo) int {
+	maxWidth := 10 // minimum width
+
+	for _, agent := range agents {
+		if len(agent.name) > maxWidth {
+			maxWidth = len(agent.name)
+		}
+	}
+
+	// Apply reasonable limits
+	if maxWidth > 50 {
+		maxWidth = 50
+	}
+
+	return maxWidth
+}
+
+// parseStatus extracts status and time information from Docker status string
+// Input examples: "Exited (5) 2 days ago", "Up 3 hours", "Created 1 week ago"
+func parseStatus(status string) (statusText, timeText string) {
+	status = strings.TrimSpace(status)
+
+	// Handle "Exited (code) time" format
+	if strings.HasPrefix(status, "Exited (") {
+		// Find the closing parenthesis
+		closeIdx := strings.Index(status, ")")
+		if closeIdx != -1 && closeIdx+1 < len(status) {
+			timePart := strings.TrimSpace(status[closeIdx+1:])
+			return "Stopped", timePart
+		}
+		return "Stopped", ""
+	}
+
+	// Handle "Up time" format
+	if strings.HasPrefix(status, "Up ") {
+		timePart := strings.TrimSpace(status[3:])
+		return "Running", timePart
+	}
+
+	// Handle "Created time" format
+	if strings.HasPrefix(status, "Created ") {
+		timePart := strings.TrimSpace(status[8:])
+		return "Created", timePart
+	}
+
+	// Fallback: return as-is
+	return status, ""
 }
