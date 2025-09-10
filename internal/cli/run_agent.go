@@ -18,34 +18,68 @@ import (
 // runAgentCmd implements `dv run-agent` (alias: `ra`).
 // Usage:
 //
-//	dv ra <agent> [prompt words...]
+//	dv ra <agent> [prompt_file|prompt words...]
 //	dv ra <agent> -- [raw agent args...]
 //
 // If no prompt/args provided, an editor is opened to enter a multiline prompt.
+// Prompt files are read from ~/.config/dv/prompts/ and autocompleted.
 var runAgentCmd = &cobra.Command{
-	Use:     "run-agent [--name NAME] AGENT [-- ARGS...|PROMPT ...]",
+	Use:     "run-agent [--name NAME] AGENT [PROMPT_FILE|-- ARGS...|PROMPT ...]",
 	Aliases: []string{"ra"},
-	Short:   "Run an AI agent inside the container with a prompt",
+	Short:   "Run an AI agent inside the container with a prompt or prompt file",
 	Args:    cobra.MinimumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		// Offer agent name completion for the first positional arg only
-		if len(args) > 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		// Build from known rules
-		var suggestions []string
-		for name := range agentRules {
-			suggestions = append(suggestions, name)
-		}
-		// Filter by prefix
-		var out []string
-		pref := strings.ToLower(strings.TrimSpace(toComplete))
-		for _, s := range suggestions {
-			if pref == "" || strings.HasPrefix(strings.ToLower(s), pref) {
-				out = append(out, s)
+		// First arg: agent name completion
+		if len(args) == 0 {
+			// Build from known rules
+			var suggestions []string
+			for name := range agentRules {
+				suggestions = append(suggestions, name)
 			}
+			// Filter by prefix
+			var out []string
+			pref := strings.ToLower(strings.TrimSpace(toComplete))
+			for _, s := range suggestions {
+				if pref == "" || strings.HasPrefix(strings.ToLower(s), pref) {
+					out = append(out, s)
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
 		}
-		return out, cobra.ShellCompDirectiveNoFileComp
+
+		// Second arg: prompt file completion
+		if len(args) == 1 {
+			configDir, err := xdg.ConfigDir()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			promptsDir := filepath.Join(configDir, "prompts")
+			entries, err := os.ReadDir(promptsDir)
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			var suggestions []string
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					suggestions = append(suggestions, entry.Name())
+				}
+			}
+
+			// Filter by prefix
+			var out []string
+			pref := strings.ToLower(strings.TrimSpace(toComplete))
+			for _, s := range suggestions {
+				if pref == "" || strings.HasPrefix(strings.ToLower(s), pref) {
+					out = append(out, s)
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		// No completion for additional args
+		return nil, cobra.ShellCompDirectiveNoFileComp
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
@@ -138,6 +172,24 @@ var runAgentCmd = &cobra.Command{
 			}
 		}
 
+		// Check if the first argument after agent is a prompt file
+		var promptFromFile string
+		if len(rest) > 0 {
+			firstArg := rest[0]
+			promptsDir := filepath.Join(configDir, "prompts")
+			promptFilePath := filepath.Join(promptsDir, firstArg)
+
+			// Check if this looks like a prompt file (exists in prompts directory)
+			if _, err := os.Stat(promptFilePath); err == nil {
+				content, err := os.ReadFile(promptFilePath)
+				if err == nil {
+					promptFromFile = strings.TrimSpace(string(content))
+					// Remove the prompt file from rest args since we've processed it
+					rest = rest[1:]
+				}
+			}
+		}
+
 		// Build the argv to run inside the container using internal rules.
 		var argv []string
 		switch {
@@ -154,6 +206,9 @@ var runAgentCmd = &cobra.Command{
 				fmt.Fprint(cmd.OutOrStdout(), out)
 				return nil
 			}
+		case promptFromFile != "":
+			// Prompt from file -> construct one-shot invocation with implicit bypass flags
+			argv = buildAgentArgs(agent, promptFromFile)
 		case len(rest) == 0:
 			// No prompt provided -> run interactively with implicit bypass flags
 			argv = buildAgentInteractive(agent)
