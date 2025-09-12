@@ -243,3 +243,53 @@ The image is based on `discourse/discourse_dev:release` and includes:
    git add . && git commit -m "Your message"
    ```
 
+## Releases
+
+This project uses automated GitHub releases with cross-platform binary builds for macOS and Linux.
+
+### Creating a Release
+
+1. **Using the release script** (recommended):
+   ```bash
+   ./scripts/release.sh v1.0.0
+   ```
+
+2. **Manual process**:
+   ```bash
+   git tag -a v1.0.0 -m "Release v1.0.0"
+   git push origin v1.0.0
+   ```
+
+### What Happens Automatically
+
+When you push a tag starting with `v`, GitHub Actions will:
+
+1. **Build binaries** for:
+   - Linux (amd64, arm64)
+   - macOS (amd64, arm64)
+
+2. **Create a GitHub release** with:
+   - Release notes from git commits
+   - Binary downloads for each platform
+   - Checksums for verification
+
+3. **Archive format**:
+   - Linux: `.tar.gz`
+   - macOS: `.tar.gz`
+   - All platforms include README.md and LICENSE
+
+### Version Information
+
+Check the version of your `dv` binary:
+```bash
+./dv version
+```
+
+This will show the version, git commit, and build date.
+
+### Release Configuration
+
+The release process is configured in:
+- `.github/workflows/release.yml` - GitHub Actions workflow
+- `.goreleaser.yml` - GoReleaser configuration for builds and packaging
+

@@ -1,0 +1,52 @@
+# Build configuration
+builds:
+  - id: dv
+    binary: dv
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/dv/main.go
+    ldflags:
+      - -s -w
+      - -X dv/internal/cli.version={{.Version}}
+      - -X dv/internal/cli.commit={{.Commit}}
+      - -X dv/internal/cli.date={{.Date}}
+
+# Archive configuration
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+# Release configuration
+release:
+  github:
+    owner: SamSaffron
+    name: dv
+  name_template: "Release {{ .Tag }}"
+  draft: false
+  prerelease: false
+
+# Checksum configuration
+checksum:
+  name_template: 'checksums.txt'
+
+# Snapshots configuration
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+# Changelog configuration
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
