@@ -81,11 +81,18 @@ func Start(name string) error {
 	return cmd.Run()
 }
 
-func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string) error {
+func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string, envs map[string]string) error {
 	args := []string{"run", "-d",
 		"--name", name,
 		"-w", workdir,
 		"-p", fmt.Sprintf("%d:%d", hostPort, containerPort),
+	}
+	// Apply environment variables
+	for k, v := range envs {
+		if strings.TrimSpace(k) == "" || strings.Contains(k, "\n") {
+			continue
+		}
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 	// Apply labels for provenance and discovery
 	for k, v := range labels {

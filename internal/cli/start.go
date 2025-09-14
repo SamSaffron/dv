@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -73,7 +74,10 @@ var startCmd = &cobra.Command{
 				"com.dv.image-name": imgName,
 				"com.dv.image-tag":  imageTag,
 			}
-			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort, labels); err != nil {
+			envs := map[string]string{
+				"DISCOURSE_PORT": strconv.Itoa(chosenPort),
+			}
+			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort, labels, envs); err != nil {
 				return err
 			}
 
