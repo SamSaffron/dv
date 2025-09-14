@@ -102,6 +102,10 @@ Run an AI agent inside the container with a prompt.
 # interactive mode
 ./dv ra codex
 
+# use a file as the prompt (useful for long instructions)
+./dv ra codex ./prompts/long-instructions.txt
+./dv ra codex ~/notes/feature-plan.md
+
 # pass raw args directly to the agent (no prompt wrapping)
 ./dv ra aider -- --yes -m "Refactor widget"
 ```
@@ -109,6 +113,8 @@ Run an AI agent inside the container with a prompt.
 Notes:
 - Autocompletes common agents: `codex`, `aider`, `claude`, `gemini`, `crush`, `cursor`, `opencode`.
 - If no prompt is provided, an inline TUI opens for multi-line input (Ctrl+D to run, Esc to cancel).
+- You can pass a regular file path as the first argument after the agent (e.g. `./dv ra codex ./plan.md`). The file will be read on the host and its contents used as the prompt. If the argument is not a file, the existing prompt behavior is used.
+- Filename/path completion is supported when you start typing a path (e.g. `./`, `../`, `/`, or include a path separator).
 - Agent invocation is rule-based (no runtime discovery). Use `--` to pass raw args unchanged (e.g., `./dv ra codex -- --help`).
 
 ### dv stop

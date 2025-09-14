@@ -49,6 +49,12 @@ var runAgentCmd = &cobra.Command{
 
 		// Second arg: prompt file completion
 		if len(args) == 1 {
+			// If the user appears to be typing a filesystem path, defer to the shell's default
+			// file completion so regular files can be selected as prompts.
+			if strings.HasPrefix(toComplete, "./") || strings.HasPrefix(toComplete, "../") || strings.HasPrefix(toComplete, "/") || strings.Contains(toComplete, string(os.PathSeparator)) {
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+
 			configDir, err := xdg.ConfigDir()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp
@@ -176,16 +182,22 @@ var runAgentCmd = &cobra.Command{
 		var promptFromFile string
 		if len(rest) > 0 {
 			firstArg := rest[0]
-			promptsDir := filepath.Join(configDir, "prompts")
-			promptFilePath := filepath.Join(promptsDir, firstArg)
-
-			// Check if this looks like a prompt file (exists in prompts directory)
-			if _, err := os.Stat(promptFilePath); err == nil {
-				content, err := os.ReadFile(promptFilePath)
-				if err == nil {
+			// 1) Prefer an actual host filesystem path if it exists (supports relative/absolute)
+			hostPath := expandHostPath(firstArg)
+			if st, err := os.Stat(hostPath); err == nil && st.Mode().IsRegular() {
+				if content, err2 := os.ReadFile(hostPath); err2 == nil {
 					promptFromFile = strings.TrimSpace(string(content))
-					// Remove the prompt file from rest args since we've processed it
 					rest = rest[1:]
+				}
+			} else {
+				// 2) Fallback to a named prompt under ~/.config/dv/prompts
+				promptsDir := filepath.Join(configDir, "prompts")
+				promptFilePath := filepath.Join(promptsDir, firstArg)
+				if st2, err3 := os.Stat(promptFilePath); err3 == nil && st2.Mode().IsRegular() {
+					if content, err4 := os.ReadFile(promptFilePath); err4 == nil {
+						promptFromFile = strings.TrimSpace(string(content))
+						rest = rest[1:]
+					}
 				}
 			}
 		}
