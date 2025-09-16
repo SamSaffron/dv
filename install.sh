@@ -4,8 +4,7 @@ set -e
 REPO_OWNER="SamSaffron"
 REPO_NAME="dv"
 BINARY_NAME="dv"
-DEFAULT_INSTALL_DIR=${DV_INSTALL_DIR:-/usr/local/bin}
-FALLBACK_INSTALL_DIR="$HOME/.local/bin"
+DEFAULT_INSTALL_DIR=${DV_INSTALL_DIR:-$HOME/.local/bin}
 
 info() {
     printf '==> %s\n' "$1"
@@ -26,7 +25,7 @@ Usage: install.sh [--version <tag>] [--install-dir <path>]
 
 Options:
   --version <tag>       Install a specific release (e.g. v0.3.0 or 0.3.0). Defaults to latest.
-  --install-dir <path>  Install to this directory (defaults to /usr/local/bin or DV_INSTALL_DIR).
+  --install-dir <path>  Install to this directory (defaults to ~/.local/bin or DV_INSTALL_DIR).
   -h, --help            Show this help message.
 
 You can also set DV_INSTALL_DIR to override the default install directory.
@@ -106,12 +105,7 @@ best_install_dir() {
         return
     fi
 
-    if [ -n "$DEFAULT_INSTALL_DIR" ]; then
-        printf '%s\n' "$DEFAULT_INSTALL_DIR"
-        return
-    fi
-
-    printf '%s\n' "$FALLBACK_INSTALL_DIR"
+    printf '%s\n' "$DEFAULT_INSTALL_DIR"
 }
 
 ensure_directory() {
@@ -124,14 +118,7 @@ ensure_directory() {
         return
     fi
 
-    if command_exists sudo; then
-        info "Creating $dir (requires sudo)"
-        if sudo mkdir -p "$dir"; then
-            return
-        fi
-    fi
-
-    err "Failed to create $dir. Try running with sudo or choose a different directory."
+    err "Failed to create $dir. Set DV_INSTALL_DIR to an accessible path and rerun."
 }
 
 install_binary() {
@@ -144,28 +131,12 @@ install_binary() {
             printf '%s\n' "$dest"
             return 0
         fi
-        if command_exists sudo; then
-            info "Installing to $dest_dir (requires sudo)"
-            if sudo install -m 755 "$src" "$dest"; then
-                printf '%s\n' "$dest"
-                return 0
-            fi
-        fi
     fi
 
     if cp "$src" "$dest" 2>/dev/null; then
         chmod 755 "$dest"
         printf '%s\n' "$dest"
         return 0
-    fi
-
-    if command_exists sudo; then
-        info "Installing to $dest_dir (requires sudo)"
-        if sudo cp "$src" "$dest"; then
-            sudo chmod 755 "$dest"
-            printf '%s\n' "$dest"
-            return 0
-        fi
     fi
 
     return 1
@@ -252,12 +223,12 @@ fi
 INSTALL_DIR=$(expand_path "$(best_install_dir)")
 ensure_directory "$INSTALL_DIR"
 
-INSTALLED_PATH=$(install_binary "$BIN_PATH" "$INSTALL_DIR") || err "Installation failed. Try running again with sudo or a writeable --install-dir."
+INSTALLED_PATH=$(install_binary "$BIN_PATH" "$INSTALL_DIR") || err "Installation failed. Set DV_INSTALL_DIR to a writeable location and rerun."
 
 info "Installed to $INSTALLED_PATH"
 
 if ! in_path "$INSTALL_DIR"; then
-    warn "$INSTALL_DIR is not in your PATH. Add it or move the binary to a directory that is."
+    warn "$INSTALL_DIR is not in your PATH. Add it to your shell profile, e.g. export PATH=\"$INSTALL_DIR:\$PATH\"."
 fi
 
 if "$INSTALLED_PATH" version >/dev/null 2>&1; then

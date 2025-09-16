@@ -28,7 +28,7 @@ Install the latest release for macOS or Linux with a single command:
 curl -sSfL https://raw.githubusercontent.com/SamSaffron/dv/main/install.sh | sh
 ```
 
-The script downloads the correct binary for your platform, installs it to `/usr/local/bin` (prompting for sudo if necessary), and falls back to `~/.local/bin` if that isn’t writeable. After it finishes, run `dv version` to confirm that the binary is on your `PATH`.
+The script downloads the correct binary for your platform and installs it to `~/.local/bin` (create it if missing). After it finishes, run `dv version` to confirm that the binary is on your `PATH`.
 
 To pin a specific release or control the install location:
 
@@ -40,7 +40,7 @@ curl -sSfL https://raw.githubusercontent.com/SamSaffron/dv/main/install.sh | sh 
 curl -sSfL https://raw.githubusercontent.com/SamSaffron/dv/main/install.sh | sh -s -- --install-dir ~/.local/bin
 ```
 
-You can also set the `DV_INSTALL_DIR` environment variable to change the default target directory.
+You can also set the `DV_INSTALL_DIR` environment variable to change the default target directory. If `~/.local/bin` (or your custom path) isn’t on your `PATH`, add it in your shell profile, e.g. `export PATH="$HOME/.local/bin:$PATH"`.
 
 `dv` automatically checks for updates once per day in the background. When a newer release is published you’ll see a warning; run `dv upgrade` to install it in place without re-running the shell script. Update metadata is cached at `${XDG_CONFIG_HOME}/dv/update-state.json`.
 
