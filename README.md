@@ -49,7 +49,7 @@ You can also set the `DV_INSTALL_DIR` environment variable to change the default
 If you’re hacking on `dv`, build the binary directly:
 
 ```bash
-go build ./cmd/dv
+go build
 ```
 
 The resulting binary is written to the repository root (run it via `./dv`).
