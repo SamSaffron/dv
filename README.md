@@ -117,6 +117,17 @@ Notes:
 - Filename/path completion is supported when you start typing a path (e.g. `./`, `../`, `/`, or include a path separator).
 - Agent invocation is rule-based (no runtime discovery). Use `--` to pass raw args unchanged (e.g., `./dv ra codex -- --help`).
 
+### dv update agents
+Refresh the preinstalled AI agents inside the container (Codex, Gemini, Crush, Claude, Aider, Cursor, OpenCode).
+
+```bash
+./dv update agents [--name NAME]
+```
+
+Notes:
+- Starts the container if needed before running updates.
+- Re-runs the official install scripts or package managers to pull the latest versions.
+
 ### dv stop
 Stop the selected or specified container.
 
@@ -298,4 +309,3 @@ This will show the version, git commit, and build date.
 The release process is configured in:
 - `.github/workflows/release.yml` - GitHub Actions workflow
 - `.goreleaser.yml` - GoReleaser configuration for builds and packaging
-

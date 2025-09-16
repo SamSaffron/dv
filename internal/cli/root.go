@@ -75,6 +75,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(dataCmd)
 	rootCmd.AddCommand(imageCmd)
+	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
