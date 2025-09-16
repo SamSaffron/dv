@@ -18,39 +18,72 @@ This project provides a containerized development environment that includes:
 - Go 1.22+
 - Optional: GitHub CLI (`gh`) if you want to use `dv extract`’s default cloning behavior
 
+## Installation
+
+### Using the install script (recommended)
+
+Install the latest release for macOS or Linux with a single command:
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/SamSaffron/dv/main/install.sh | sh
+```
+
+The script downloads the correct binary for your platform, installs it to `/usr/local/bin` (prompting for sudo if necessary), and falls back to `~/.local/bin` if that isn’t writeable. After it finishes, run `dv version` to confirm that the binary is on your `PATH`.
+
+To pin a specific release or control the install location:
+
+```bash
+# install a specific tag
+curl -sSfL https://raw.githubusercontent.com/SamSaffron/dv/main/install.sh | sh -s -- --version v0.3.0
+
+# install without sudo
+curl -sSfL https://raw.githubusercontent.com/SamSaffron/dv/main/install.sh | sh -s -- --install-dir ~/.local/bin
+```
+
+You can also set the `DV_INSTALL_DIR` environment variable to change the default target directory.
+
+`dv` automatically checks for updates once per day in the background. When a newer release is published you’ll see a warning; run `dv upgrade` to install it in place without re-running the shell script. Update metadata is cached at `${XDG_CONFIG_HOME}/dv/update-state.json`.
+
+### Build from source
+
+If you’re hacking on `dv`, build the binary directly:
+
+```bash
+go build ./cmd/dv
+```
+
+The resulting binary is written to the repository root (run it via `./dv`).
+
 ## Quick Start
 
-1. Build the `dv` binary:
+With `dv` installed (either via the script or `go build`), run the CLI directly from your shell. If you’re using the locally built binary in this repository, replace `dv` with `./dv` in the commands below.
+
+1. Build the Docker image:
    ```bash
-   go build
+   dv build
    ```
 
-2. Build the Docker image:
+2. Start the container:
    ```bash
-   ./dv build
+   dv start
    ```
-
-3. Start the container:
+3. Enter the container (interactive shell or run a command):
    ```bash
-   ./dv start
-   ```
-4. Enter the container (interactive shell or run a command):
-   ```bash
-   ./dv enter
+   dv enter
    # or to run a one-off command
-   ./dv enter -- bin/rails c
+   dv enter -- bin/rails c
    ```
-5. Extract changes from the container (when ready to create a PR):
+4. Extract changes from the container (when ready to create a PR):
    ```bash
-   ./dv extract
+   dv extract
    ```
 
 Optional: manage multiple named containers ("agents"):
 ```bash
-./dv new my_project     # create and select a new agent
-./dv list               # show all agents for the selected image
-./dv select my_project  # select an existing agent
-./dv rename old new     # rename an agent
+dv new my_project     # create and select a new agent
+dv list               # show all agents for the selected image
+dv select my_project  # select an existing agent
+dv rename old new     # rename an agent
 ```
 
 ## dv Commands
@@ -59,7 +92,7 @@ Optional: manage multiple named containers ("agents"):
 Build the Docker image (defaults to tag `ai_agent`).
 
 ```bash
-./dv build [--no-cache] [--build-arg KEY=VAL] [--rm-existing]
+dv build [--no-cache] [--build-arg KEY=VAL] [--rm-existing]
 ```
 
 Notes:
@@ -74,7 +107,7 @@ Notes:
 Create or start the container for the selected image (no shell).
 
 ```bash
-./dv start [--reset] [--name NAME] [--image NAME] [--host-starting-port N] [--container-port N]
+dv start [--reset] [--name NAME] [--image NAME] [--host-starting-port N] [--container-port N]
 ```
 
 Notes:
@@ -85,7 +118,7 @@ Notes:
 Attach to the running container as user `discourse` in `/var/www/discourse`, or run a one-off command.
 
 ```bash
-./dv enter [--name NAME] [-- cmd ...]
+dv enter [--name NAME] [-- cmd ...]
 ```
 
 Notes:
@@ -95,33 +128,33 @@ Notes:
 Run an AI agent inside the container with a prompt.
 
 ```bash
-./dv run-agent [--name NAME] AGENT [-- ARGS...|PROMPT ...]
+dv run-agent [--name NAME] AGENT [-- ARGS...|PROMPT ...]
 # alias
-./dv ra codex Write a migration to add foo to users
+dv ra codex Write a migration to add foo to users
 
 # interactive mode
-./dv ra codex
+dv ra codex
 
 # use a file as the prompt (useful for long instructions)
-./dv ra codex ./prompts/long-instructions.txt
-./dv ra codex ~/notes/feature-plan.md
+dv ra codex ./prompts/long-instructions.txt
+dv ra codex ~/notes/feature-plan.md
 
 # pass raw args directly to the agent (no prompt wrapping)
-./dv ra aider -- --yes -m "Refactor widget"
+dv ra aider -- --yes -m "Refactor widget"
 ```
 
 Notes:
 - Autocompletes common agents: `codex`, `aider`, `claude`, `gemini`, `crush`, `cursor`, `opencode`.
 - If no prompt is provided, an inline TUI opens for multi-line input (Ctrl+D to run, Esc to cancel).
-- You can pass a regular file path as the first argument after the agent (e.g. `./dv ra codex ./plan.md`). The file will be read on the host and its contents used as the prompt. If the argument is not a file, the existing prompt behavior is used.
+- You can pass a regular file path as the first argument after the agent (e.g. `dv ra codex ./plan.md`). The file will be read on the host and its contents used as the prompt. If the argument is not a file, the existing prompt behavior is used.
 - Filename/path completion is supported when you start typing a path (e.g. `./`, `../`, `/`, or include a path separator).
-- Agent invocation is rule-based (no runtime discovery). Use `--` to pass raw args unchanged (e.g., `./dv ra codex -- --help`).
+- Agent invocation is rule-based (no runtime discovery). Use `--` to pass raw args unchanged (e.g., `dv ra codex -- --help`).
 
 ### dv update agents
 Refresh the preinstalled AI agents inside the container (Codex, Gemini, Crush, Claude, Aider, Cursor, OpenCode).
 
 ```bash
-./dv update agents [--name NAME]
+dv update agents [--name NAME]
 ```
 
 Notes:
@@ -132,31 +165,31 @@ Notes:
 Stop the selected or specified container.
 
 ```bash
-./dv stop [--name NAME]
+dv stop [--name NAME]
 ```
 
 ### dv remove
 Remove the container and optionally the image.
 
 ```bash
-./dv remove [--image] [--name NAME]
+dv remove [--image] [--name NAME]
 ```
 
 ### Agent management
 Manage multiple containers for the selected image; selection is stored in XDG config. These are the preferred top-level commands; the old `dv agent` group has been removed.
 
 ```bash
-./dv list
-./dv new [NAME]
-./dv select NAME
-./dv rename OLD NEW
+dv list
+dv new [NAME]
+dv select NAME
+dv rename OLD NEW
 ```
 
 ### dv extract
 Copy modified files from the running container’s `/var/www/discourse` into a local clone and create a new branch at the container’s HEAD.
 
 ```bash
-./dv extract [--name NAME]
+dv extract [--name NAME]
 ```
 
 By default, the destination is `${XDG_DATA_HOME}/dv/discourse_src`.
@@ -165,9 +198,9 @@ By default, the destination is `${XDG_DATA_HOME}/dv/discourse_src`.
 Read/write config stored at `${XDG_CONFIG_HOME}/dv/config.json`.
 
 ```bash
-./dv config get KEY
-./dv config set KEY VALUE
-./dv config show
+dv config get KEY
+dv config set KEY VALUE
+dv config show
 ```
 
 #### Copying host files on enter
@@ -186,16 +219,26 @@ The parent directory inside the container is created if needed, and ownership is
 Print the data directory path (`${XDG_DATA_HOME}/dv`).
 
 ```bash
-./dv data
+dv data
 ```
 
 ### dv config completion
 Generate shell completion scripts (rarely needed). For zsh:
 
 ```bash
-./dv config completion zsh           # print to stdout
-./dv config completion zsh --install # install to ~/.local/share/zsh/site-functions/_dv
+dv config completion zsh           # print to stdout
+dv config completion zsh --install # install to ~/.local/share/zsh/site-functions/_dv
 ```
+
+### dv upgrade
+Download and replace the current binary with the latest GitHub release (or a specific tag).
+
+```bash
+dv upgrade           # install the newest release for your platform
+dv upgrade --version v0.3.0
+```
+
+The command writes the data to the same path as the running executable, so use `sudo dv upgrade` if `dv` lives somewhere like `/usr/local/bin`.
 
 ## Environment Variables
 
@@ -245,18 +288,18 @@ The image is based on `discourse/discourse_dev:release` and includes:
 
 1. Build image:
    ```bash
-   ./dv build
+   dv build
    ```
 2. Develop inside the container:
    ```bash
-   ./dv start
-   ./dv enter
+   dv start
+   dv enter
    # Work with Discourse at /var/www/discourse
    ```
 3. Extract changes to a local clone and commit:
    ```bash
-   ./dv extract
-   cd $(./dv data)/discourse_src
+   dv extract
+   cd $(dv data)/discourse_src
    git add . && git commit -m "Your message"
    ```
 
@@ -299,7 +342,7 @@ When you push a tag starting with `v`, GitHub Actions will:
 
 Check the version of your `dv` binary:
 ```bash
-./dv version
+dv version
 ```
 
 This will show the version, git commit, and build date.
