@@ -1,22 +1,135 @@
 #!/bin/bash
 
 # Release script for dv
-# Usage: ./scripts/release.sh <version>
-# Example: ./scripts/release.sh v1.0.0
+# Usage:
+#   ./scripts/release.sh v1.0.0
+#   ./scripts/release.sh --auto
 
-set -e
+set -euo pipefail
 
-if [ $# -eq 0 ]; then
-    echo "Usage: $0 <version>"
-    echo "Example: $0 v1.0.0"
+DEFAULT_REPO="SamSaffron/dv"
+
+usage() {
+    cat <<USAGE
+Usage: $0 [--auto | <version>]
+
+Examples:
+  $0 v1.0.0        # release explicit version
+  $0 --auto        # bump patch version based on latest GitHub release
+USAGE
+}
+
+require_clean_worktree() {
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: Working directory is not clean. Please commit or stash changes." >&2
+        exit 1
+    fi
+}
+
+detect_repo() {
+    local remote
+    remote=$(git remote get-url origin 2>/dev/null || true)
+    if [[ $remote =~ github.com[:/][^/]+/[^/]+(.git)?$ ]]; then
+        remote=${remote%.git}
+        remote=${remote##*@github.com:}
+        remote=${remote##*github.com/}
+        printf '%s\n' "$remote"
+        return
+    fi
+    printf '%s\n' "$DEFAULT_REPO"
+}
+
+fetch_latest_release_tag() {
+    local repo tag
+    repo=$(detect_repo)
+    if command -v curl >/dev/null 2>&1; then
+        tag=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
+            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+        if [ -n "$tag" ]; then
+            printf '%s\n' "$tag"
+            return
+        fi
+    fi
+
+    # Fallback to local tags (ensure they're up to date if possible)
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        if git remote | grep -qx "origin"; then
+            git fetch --quiet --tags origin || true
+        else
+            git fetch --quiet --tags || true
+        fi
+        tag=$(git tag -l "v*" --sort=v:refname | tail -n1)
+        if [ -n "$tag" ]; then
+            printf '%s\n' "$tag"
+            return
+        fi
+    fi
+}
+
+compute_next_patch_version() {
+    local latest raw major minor patch
+    latest=$(fetch_latest_release_tag)
+    if [ -z "$latest" ]; then
+        latest="v0.0.0"
+    fi
+    raw=${latest#v}
+    if [[ ! $raw =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "Error: Latest release tag '$latest' is not in vMAJOR.MINOR.PATCH format." >&2
+        exit 1
+    fi
+    IFS='.' read -r major minor patch <<<"$raw"
+    patch=$((patch + 1))
+    printf 'v%d.%d.%d\n' "$major" "$minor" "$patch"
+}
+
+AUTO=false
+VERSION=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --auto)
+            AUTO=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --*)
+            echo "Unknown option: $1" >&2
+            usage
+            exit 1
+            ;;
+        *)
+            if [ -n "$VERSION" ]; then
+                echo "Error: Multiple version arguments provided." >&2
+                usage
+                exit 1
+            fi
+            VERSION="$1"
+            shift
+            ;;
+    esac
+done
+
+if [ "$AUTO" = "true" ] && [ -n "$VERSION" ]; then
+    echo "Error: Cannot use --auto and an explicit version together." >&2
+    usage
     exit 1
 fi
 
-VERSION=$1
+if [ "$AUTO" != "true" ] && [ -z "$VERSION" ]; then
+    usage
+    exit 1
+fi
 
-# Validate version format (should start with 'v')
+if [ "$AUTO" = "true" ]; then
+    VERSION=$(compute_next_patch_version)
+    echo "Auto-detected next version: $VERSION"
+fi
+
 if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: Version must be in format v1.0.0"
+    echo "Error: Version must be in format v1.0.0" >&2
     exit 1
 fi
 
@@ -33,11 +146,7 @@ if [ "$CURRENT_BRANCH" != "main" ]; then
     fi
 fi
 
-# Ensure working directory is clean
-if [ -n "$(git status --porcelain)" ]; then
-    echo "Error: Working directory is not clean. Please commit or stash changes."
-    exit 1
-fi
+require_clean_worktree
 
 # Create and push tag
 echo "Creating tag $VERSION..."

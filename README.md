@@ -312,6 +312,8 @@ This project uses automated GitHub releases with cross-platform binary builds fo
 1. **Using the release script** (recommended):
    ```bash
    ./scripts/release.sh v1.0.0
+   # or automatically bump the patch version based on the latest GitHub release
+   ./scripts/release.sh --auto
    ```
 
 2. **Manual process**:
