@@ -2,9 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"dv/internal/assets"
 	"dv/internal/config"
 	"dv/internal/docker"
 	"dv/internal/xdg"
@@ -80,6 +83,79 @@ var updateAgentsCmd = &cobra.Command{
 	},
 }
 
+var updateDiscourseCmd = &cobra.Command{
+	Use:   "discourse",
+	Short: "Update the Discourse image to latest using an embedded Dockerfile",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		configDir, err := xdg.ConfigDir()
+		if err != nil {
+			return err
+		}
+		cfg, err := config.LoadOrCreate(configDir)
+		if err != nil {
+			return err
+		}
+
+		// Determine which image to update (default: selected image)
+		imageName, _ := cmd.Flags().GetString("image")
+		if strings.TrimSpace(imageName) == "" {
+			imageName = cfg.SelectedImage
+		}
+		imgCfg, ok := cfg.Images[imageName]
+		if !ok {
+			return fmt.Errorf("unknown image '%s'", imageName)
+		}
+		if imgCfg.Kind != "discourse" {
+			return fmt.Errorf("'dv update discourse' only supports discourse-kind images; image '%s' is %q", imageName, imgCfg.Kind)
+		}
+
+		// Resolve the update Dockerfile to a local path
+		dockerfilePath, contextDir, _, err := assets.ResolveDockerfileUpdateDiscourse(configDir)
+		if err != nil {
+			return err
+		}
+
+		// Build a temporary tag from the existing base image
+		baseTag := imgCfg.Tag
+		if strings.TrimSpace(baseTag) == "" {
+			return fmt.Errorf("image '%s' has empty tag", imageName)
+		}
+		if !docker.ImageExists(baseTag) {
+			return fmt.Errorf("base image tag '%s' does not exist; build it first with 'dv build'", baseTag)
+		}
+
+		// temp tag adds a suffix to avoid overwriting on failure
+		tempTag := baseTag + ":updating"
+		// If baseTag already contains a colon (repo:tag), preserve repo and use a separate temporary repo:tag if desired.
+		// We will simply append -updated to the tag portion when colon is present.
+		if strings.Contains(baseTag, ":") {
+			// split on last colon
+			idx := strings.LastIndex(baseTag, ":")
+			repo := baseTag[:idx]
+			tag := baseTag[idx+1:]
+			tempTag = repo + ":" + tag + "-updating"
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "Updating Discourse in image '%s' (tag %s) using %s...\n", imageName, baseTag, filepath.Base(dockerfilePath))
+
+		// Build with BASE_IMAGE arg pointing at existing image tag
+		buildArgs := []string{"--build-arg", "BASE_IMAGE=" + baseTag}
+		if err := docker.BuildFrom(tempTag, dockerfilePath, contextDir, buildArgs); err != nil {
+			return err
+		}
+
+		// Retag tempTag to baseTag (overwrite baseTag to point at updated image)
+		fmt.Fprintf(cmd.OutOrStdout(), "Retagging %s -> %s...\n", tempTag, baseTag)
+		if err := docker.TagImage(tempTag, baseTag); err != nil {
+			return err
+		}
+
+		fmt.Fprintln(cmd.OutOrStdout(), "Discourse image updated to latest.")
+		return nil
+	},
+}
+
 type agentUpdateStep struct {
 	label        string
 	command      string
@@ -126,4 +202,8 @@ func resolveImageConfig(cfg config.Config, containerName string) (config.ImageCo
 func init() {
 	updateCmd.AddCommand(updateAgentsCmd)
 	updateAgentsCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
+
+	// dv update discourse
+	updateCmd.AddCommand(updateDiscourseCmd)
+	updateDiscourseCmd.Flags().String("image", "", "Image name to update (defaults to selected image)")
 }

@@ -18,6 +18,9 @@ import (
 //go:embed Dockerfile
 var embeddedDockerfile []byte
 
+//go:embed Dockerfile.update.discourse
+var embeddedDockerfileUpdateDiscourse []byte
+
 //go:embed Dockerfile.theme
 var embeddedDockerfileTheme []byte
 
@@ -59,6 +62,21 @@ func ResolveDockerfile(configDir string) (string, string, bool, error) {
 // It returns (dockerfilePath, contextDir, usedOverride, error)
 func ResolveDockerfileTheme(configDir string) (string, string, bool, error) {
 	return resolveDockerfileInternal(configDir, "Dockerfile.theme", embeddedDockerfileTheme, EmbeddedDockerfileThemeSHA256())
+}
+
+// EmbeddedDockerfileUpdateDiscourseSHA256 returns the hex-encoded SHA-256 of the embedded update Dockerfile.
+func EmbeddedDockerfileUpdateDiscourseSHA256() string {
+	sum := sha256.Sum256(embeddedDockerfileUpdateDiscourse)
+	return hex.EncodeToString(sum[:])
+}
+
+// ResolveDockerfileUpdateDiscourse resolves the update Dockerfile used by `dv update discourse`.
+// Priority:
+// 1) DV_DOCKERFILE_UPDATE_DISCOURSE env var
+// 2) <configDir>/Dockerfile.update.discourse.local
+// 3) embedded Dockerfile.update.discourse at <configDir>/Dockerfile.update.discourse
+func ResolveDockerfileUpdateDiscourse(configDir string) (string, string, bool, error) {
+	return resolveDockerfileInternal(configDir, "Dockerfile.update.discourse", embeddedDockerfileUpdateDiscourse, EmbeddedDockerfileUpdateDiscourseSHA256())
 }
 
 // resolveDockerfileInternal is a helper function to resolve Dockerfiles with different names

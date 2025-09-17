@@ -75,6 +75,13 @@ func RemoveImage(tag string) error {
 	return cmd.Run()
 }
 
+// TagImage applies a new tag to an existing image (docker tag src dst)
+func TagImage(srcTag, dstTag string) error {
+	cmd := exec.Command("docker", "tag", srcTag, dstTag)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 func Start(name string) error {
 	cmd := exec.Command("docker", "start", name)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

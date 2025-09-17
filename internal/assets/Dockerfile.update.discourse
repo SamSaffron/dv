@@ -1,0 +1,18 @@
+ARG BASE_IMAGE=ai_agent
+FROM ${BASE_IMAGE}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Update Discourse repo to latest main and refresh deps
+RUN sudo -H -u discourse /bin/bash -lc "set -euo pipefail; cd /var/www/discourse; if [ -f .git/shallow ]; then git fetch origin --tags --prune --unshallow; else git fetch origin --tags --prune; fi; git fetch origin main; git checkout -B main origin/main; git reset --hard origin/main"
+
+RUN sudo -H -u discourse /bin/bash -lc "set -euo pipefail; cd /var/www/discourse; bundle install; pnpm install"
+
+# Run migrations (dev and test) with services up, then stop them
+RUN /sbin/boot & \
+    sleep 10 && \
+    sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bundle exec rake db:migrate' && \
+    sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && RAILS_ENV=test bundle exec rake db:migrate' && \
+    pkill -f "/sbin/boot" || true
