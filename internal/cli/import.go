@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,11 +146,10 @@ var importCmd = &cobra.Command{
 		scanner := bufio.NewScanner(strings.NewReader(statusOut))
 		for scanner.Scan() {
 			line := scanner.Text()
-			line = strings.TrimSpace(line)
-			if line == "" {
+			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			if len(line) < 4 { // e.g. "?? x"
+			if len(line) < 3 {
 				continue
 			}
 			codes := line[:2]
@@ -181,7 +181,7 @@ var importCmd = &cobra.Command{
 		}
 
 		// Deduplicate and normalize lists
-		copies = uniqueStrings(filterExistingFiles(repoRoot, copies))
+		copies = uniqueStrings(expandExistingPaths(repoRoot, copies))
 		deletes = uniqueStrings(deletes)
 
 		// Copy patches directory to container under /tmp
@@ -205,8 +205,23 @@ var importCmd = &cobra.Command{
 		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git fetch origin --tags --prune --depth=0 || git fetch origin --tags --prune --unshallow || git fetch origin --tags --prune"}); err != nil {
 			return fmt.Errorf("container: failed to fetch refs: %v\n%s", err, strings.TrimSpace(out))
 		}
-		// 3) Force-align base branch name to the exact baseSha
-		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", fmt.Sprintf("git branch -f %s %s || git checkout -b %s %s", shellQuote(base), shellQuote(baseSha), shellQuote(base), shellQuote(baseSha))}); err != nil {
+		// 3) Force-align base branch name to the exact baseSha without failing when already checked out
+		alignCmd := fmt.Sprintf(strings.Join([]string{
+			"set -euo pipefail",
+			fmt.Sprintf("branch=%s", shellQuote(base)),
+			fmt.Sprintf("sha=%s", shellQuote(baseSha)),
+			"current=$(git symbolic-ref --quiet --short HEAD || true)",
+			"if [ \"$current\" != \"$branch\" ]; then",
+			"\tif git show-ref --verify --quiet \"refs/heads/$branch\"; then",
+			"\t\tgit branch -f \"$branch\" \"$sha\"",
+			"\telse",
+			"\t\tgit branch \"$branch\" \"$sha\"",
+			"\tfi",
+			"\tgit checkout \"$branch\"",
+			"fi",
+			"git reset --hard \"$sha\"",
+		}, "\n"))
+		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", alignCmd}); err != nil {
 			return fmt.Errorf("container: failed to set base branch %s to %s: %v\n%s", base, baseSha, err, strings.TrimSpace(out))
 		}
 		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", fmt.Sprintf("git checkout %s && git reset --hard %s", shellQuote(base), shellQuote(baseSha))}); err != nil {
@@ -348,17 +363,50 @@ func runHostCapture(dir string, name string, args ...string) (string, error) {
 	return string(out), nil
 }
 
-func filterExistingFiles(root string, rels []string) []string {
+func expandExistingPaths(root string, rels []string) []string {
 	var out []string
-	for _, r := range rels {
-		r = strings.TrimSpace(r)
-		if r == "" {
+	for _, rel := range rels {
+		rel = strings.TrimSpace(rel)
+		if rel == "" {
 			continue
 		}
-		abs := filepath.Join(root, r)
-		if fi, err := os.Stat(abs); err == nil && fi.Mode().IsRegular() {
-			out = append(out, r)
+		abs := filepath.Join(root, rel)
+		info, err := os.Lstat(abs)
+		if err != nil {
+			continue
 		}
+		// Follow symlinks to capture the pointed-to type
+		if info.Mode()&fs.ModeSymlink != 0 {
+			if resolved, err := os.Stat(abs); err == nil {
+				info = resolved
+			}
+		}
+		if info.Mode().IsRegular() {
+			out = append(out, filepath.ToSlash(rel))
+			continue
+		}
+		if !info.IsDir() {
+			continue
+		}
+		// Walk directories to include contained files
+		filepath.WalkDir(abs, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			typeInfo := d.Type()
+			if !typeInfo.IsRegular() && typeInfo&fs.ModeSymlink == 0 {
+				return nil
+			}
+			relPath, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil
+			}
+			out = append(out, filepath.ToSlash(relPath))
+			return nil
+		})
 	}
 	return out
 }
