@@ -252,6 +252,7 @@ Automatically passed through when set on the host:
 - `CLAUDE_CODE_USE_BEDROCK`
 - `DEEPSEEK_API_KEY`
 - `GEMINI_API_KEY`
+- `AMP_API_KEY`
 
 ## Container Details
 
