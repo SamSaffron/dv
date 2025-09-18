@@ -304,44 +304,46 @@ type agentRule struct {
 }
 
 var agentRules = map[string]agentRule{
-	// Cursor
 	"cursor": {
 		interactive: func() []string { return []string{"cursor-agent"} },
 		withPrompt:  func(p string) []string { return []string{"cursor-agent", "-p", p} },
 		defaults:    []string{"-f"},
 	},
-	// OpenAI Codex
 	"codex": {
 		interactive: func() []string { return []string{"codex"} },
 		withPrompt:  func(p string) []string { return []string{"codex", "exec", p} },
 		defaults:    []string{"--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
 	},
-	// Aider
 	"aider": {
 		interactive: func() []string { return []string{"aider"} },
 		withPrompt:  func(p string) []string { return []string{"aider", "--message", p} },
 		defaults:    []string{"--yes-always"},
 	},
-	// Claude CLI
 	"claude": {
 		interactive: func() []string { return []string{"claude"} },
 		withPrompt:  func(p string) []string { return []string{"claude", "-p", p} },
 		defaults:    []string{"--dangerously-skip-permissions"},
 	},
-	// Google Gemini CLI
 	"gemini": {
 		interactive: func() []string { return []string{"gemini"} },
 		withPrompt:  func(p string) []string { return []string{"gemini", "-p", p} },
 		defaults:    []string{"-y"},
 	},
-	// Crush
 	"crush": {
 		interactive: func() []string { return []string{"crush"} },
 		withPrompt:  func(p string) []string { return []string{"crush", "--prompt", p} },
 		defaults:    []string{},
 	},
-	// OpenCode
-	// opencode: disabled until verified in image
+	"amp": {
+		interactive: func() []string { return []string{"amp"} },
+		withPrompt:  func(p string) []string { return []string{"amp", "-x", p} },
+		defaults:    []string{"--dangerously-allow-all"},
+	},
+	"opencode": {
+		interactive: func() []string { return []string{"opencode"} },
+		withPrompt:  func(p string) []string { return []string{"opencode", "run", p} },
+		defaults:    []string{},
+	},
 }
 
 // shellJoin quotes argv for safe execution in a single shell command.

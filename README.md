@@ -144,7 +144,7 @@ dv ra aider -- --yes -m "Refactor widget"
 ```
 
 Notes:
-- Autocompletes common agents: `codex`, `aider`, `claude`, `gemini`, `crush`, `cursor`, `opencode`.
+- Autocompletes common agents: `codex`, `aider`, `claude`, `gemini`, `crush`, `cursor`, `opencode`, `amp`.
 - If no prompt is provided, an inline TUI opens for multi-line input (Ctrl+D to run, Esc to cancel).
 - You can pass a regular file path as the first argument after the agent (e.g. `dv ra codex ./plan.md`). The file will be read on the host and its contents used as the prompt. If the argument is not a file, the existing prompt behavior is used.
 - Filename/path completion is supported when you start typing a path (e.g. `./`, `../`, `/`, or include a path separator).
