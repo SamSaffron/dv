@@ -99,5 +99,7 @@ RUN chmod +x /etc/runit/3.d/02-ember-cli
 
 ENV LEFTHOOK=1
 ENV DISCOURSE_DEV_ALLOW_ANON_TO_IMPERSONATE=1
+# allows qunit to work without CI being set to 1 which breaks a bunch of agents
+ENV DISCOURSE_DISABLE_BROWSER_SANDBOX=1
 
 ENTRYPOINT ["/sbin/boot"]
