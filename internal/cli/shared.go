@@ -159,6 +159,13 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 		for isPortInUse(chosenPort) {
 			chosenPort++
 		}
+
+		// Find the first available SSH port, starting from 20022
+		sshPort := 20022
+		for isPortInUse(sshPort) {
+			sshPort++
+		}
+
 		labels := map[string]string{
 			"com.dv.owner":      "dv",
 			"com.dv.image-name": imgName,
@@ -167,7 +174,14 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 		envs := map[string]string{
 			"DISCOURSE_PORT": strconv.Itoa(chosenPort),
 		}
-		if err := docker.RunDetached(name, workdir, imageTag, chosenPort, cfg.ContainerPort, labels, envs); err != nil {
+
+		// Set up port mappings: Discourse port and SSH port
+		portMappings := map[int]int{
+			cfg.ContainerPort: chosenPort,
+			22:                sshPort, // SSH port
+		}
+
+		if err := docker.RunDetachedWithPorts(name, workdir, imageTag, portMappings, labels, envs); err != nil {
 			return err
 		}
 	} else if !docker.Running(name) {

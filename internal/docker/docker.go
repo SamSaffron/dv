@@ -89,11 +89,22 @@ func Start(name string) error {
 }
 
 func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string, envs map[string]string) error {
+	portMappings := map[int]int{containerPort: hostPort}
+	return RunDetachedWithPorts(name, workdir, image, portMappings, labels, envs)
+}
+
+// RunDetachedWithPorts runs a container with multiple port mappings
+func RunDetachedWithPorts(name, workdir, image string, portMappings map[int]int, labels map[string]string, envs map[string]string) error {
 	args := []string{"run", "-d",
 		"--name", name,
 		"-w", workdir,
-		"-p", fmt.Sprintf("%d:%d", hostPort, containerPort),
 	}
+
+	// Apply port mappings
+	for containerPort, hostPort := range portMappings {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", hostPort, containerPort))
+	}
+
 	// Apply environment variables
 	for k, v := range envs {
 		if strings.TrimSpace(k) == "" || strings.Contains(k, "\n") {

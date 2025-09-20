@@ -5,7 +5,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends vim ripgrep zip
+RUN apt-get install -y --no-install-recommends vim ripgrep zip openssh-server
 
 RUN npm i -g @openai/codex
 RUN npm i -g @google/gemini-cli
@@ -97,6 +97,65 @@ RUN mkdir -p /etc/runit/3.d && \
 sv stop ember-cli
 EOF
 RUN chmod +x /etc/runit/3.d/02-ember-cli
+
+# Configure SSH daemon
+RUN mkdir -p /var/run/sshd
+RUN mkdir -p /etc/service/sshd && \
+    tee /etc/service/sshd/run > /dev/null <<'EOF'
+#!/bin/bash
+exec /usr/sbin/sshd -D
+EOF
+RUN chmod +x /etc/service/sshd/run
+
+RUN mkdir -p /etc/runit/3.d && \
+    tee /etc/runit/3.d/04-sshd > /dev/null <<'EOF'
+#!/bin/bash
+sv stop sshd
+EOF
+RUN chmod +x /etc/runit/3.d/04-sshd
+
+# Configure SSH for discourse user
+RUN echo "discourse:password" | chpasswd
+RUN mkdir -p /home/discourse/.ssh
+RUN chown discourse:discourse /home/discourse/.ssh
+RUN chmod 700 /home/discourse/.ssh
+
+# Configure SSH daemon settings
+RUN tee /etc/ssh/sshd_config > /dev/null <<'EOF'
+Port 22
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_dsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+UsePrivilegeSeparation yes
+KeyRegenerationInterval 3600
+ServerKeyBits 1024
+SyslogFacility AUTH
+LogLevel INFO
+LoginGraceTime 120
+PermitRootLogin no
+StrictModes yes
+RSAAuthentication yes
+PubkeyAuthentication yes
+IgnoreRhosts yes
+RhostsRSAAuthentication no
+HostbasedAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+PasswordAuthentication yes
+X11Forwarding yes
+X11DisplayOffset 10
+PrintMotd no
+PrintLastLog yes
+TCPKeepAlive yes
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server
+UsePAM yes
+EOF
+
+# Generate SSH host keys
+RUN ssh-keygen -A
 
 ENV LEFTHOOK=1
 ENV DISCOURSE_DEV_ALLOW_ANON_TO_IMPERSONATE=1

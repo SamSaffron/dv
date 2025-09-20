@@ -145,6 +145,8 @@ func parseHostPortURLs(portsField string) []string {
 			continue
 		}
 		left := strings.TrimSpace(seg[:arrowIdx])
+		right := strings.TrimSpace(seg[arrowIdx+2:]) // Everything after "->"
+
 		// left may be like "0.0.0.0:4201" or ":::4201" or "127.0.0.1:4201"
 		colonIdx := strings.LastIndex(left, ":")
 		if colonIdx == -1 || colonIdx+1 >= len(left) {
@@ -155,7 +157,15 @@ func parseHostPortURLs(portsField string) []string {
 		if hostPort == "" {
 			continue
 		}
-		url := "http://localhost:" + hostPort
+
+		// Check if this is an SSH port by looking at the container port (right side)
+		// SSH ports map to container port 22
+		var url string
+		if strings.HasPrefix(right, "22/") {
+			url = "ssh://localhost:" + hostPort
+		} else {
+			url = "http://localhost:" + hostPort
+		}
 		if _, ok := seen[url]; !ok {
 			seen[url] = struct{}{}
 			urls = append(urls, url)

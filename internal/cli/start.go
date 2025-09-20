@@ -68,7 +68,19 @@ var startCmd = &cobra.Command{
 			if chosenPort != hostPort {
 				fmt.Fprintf(cmd.OutOrStdout(), "Port %d in use, using %d.\n", hostPort, chosenPort)
 			}
+
+			// Find the first available SSH port, starting from 20022
+			sshPort := 20022
+			for isPortInUse(sshPort) {
+				sshPort++
+			}
+			if sshPort != 20022 {
+				fmt.Fprintf(cmd.OutOrStdout(), "SSH port 20022 in use, using %d.\n", sshPort)
+			}
+
 			fmt.Fprintf(cmd.OutOrStdout(), "Creating and starting container '%s' with image '%s'...\n", name, imageTag)
+			fmt.Fprintf(cmd.OutOrStdout(), "SSH access: ssh discourse@localhost -p %d (password: password)\n", sshPort)
+
 			labels := map[string]string{
 				"com.dv.owner":      "dv",
 				"com.dv.image-name": imgName,
@@ -77,7 +89,14 @@ var startCmd = &cobra.Command{
 			envs := map[string]string{
 				"DISCOURSE_PORT": strconv.Itoa(chosenPort),
 			}
-			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort, labels, envs); err != nil {
+
+			// Set up port mappings: Discourse port and SSH port
+			portMappings := map[int]int{
+				containerPort: chosenPort,
+				22:            sshPort, // SSH port
+			}
+
+			if err := docker.RunDetachedWithPorts(name, workdir, imageTag, portMappings, labels, envs); err != nil {
 				return err
 			}
 
