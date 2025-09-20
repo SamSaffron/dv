@@ -76,6 +76,8 @@ With `dv` installed (either via the script or `go build`), run the CLI directly 
 4. Extract changes from the container (when ready to create a PR):
    ```bash
    dv extract
+   # or extract changes for a specific plugin (with TAB completion)
+   dv extract plugin discourse-akismet
    ```
 
 Optional: manage multiple named containers ("agents"):
@@ -193,6 +195,36 @@ dv extract [--name NAME]
 ```
 
 By default, the destination is `${XDG_DATA_HOME}/dv/discourse_src`.
+
+### dv extract plugin
+Extract changes for a single plugin from the running container. This is useful when a plugin is its own git repository under `/var/www/discourse/plugins`.
+
+```bash
+dv extract plugin <name> [--name NAME] [--chdir] [--echo-cd]
+```
+
+Notes:
+- Requires the container to be running to discover plugins.
+- TAB completion suggests plugin names under `/var/www/discourse/plugins` that are separate git repositories from the core Discourse repo.
+- Destination is `${XDG_DATA_HOME}/dv/<PLUGIN>_src`.
+- If the plugin is a git repo with a remote, dv clones it and checks out a branch/commit matching the container; only modified/untracked files are copied over.
+- If the plugin has no git remote or isn’t a git repo, dv copies the whole directory to `<PLUGIN>_src`.
+- `--chdir` opens a subshell in the extracted directory on completion. `--echo-cd` prints a `cd <path>` line to stdout (suitable for `eval`).
+
+Examples:
+```bash
+# Autocomplete plugin name
+dv extract plugin <TAB>
+
+# Extract changes for akismet plugin
+dv extract plugin discourse-akismet
+
+# Jump into the extracted repo afterwards
+dv extract plugin discourse-akismet --chdir
+
+# Use in command substitution to cd silently
+eval "$(dv extract plugin discourse-akismet --echo-cd)"
+```
 
 ### dv config
 Read/write config stored at `${XDG_CONFIG_HOME}/dv/config.json`.
