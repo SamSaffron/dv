@@ -191,10 +191,24 @@ dv rename OLD NEW
 Copy modified files from the running container’s `/var/www/discourse` into a local clone and create a new branch at the container’s HEAD.
 
 ```bash
-dv extract [--name NAME]
+dv extract [--name NAME] [--sync] [--debug]
 ```
 
 By default, the destination is `${XDG_DATA_HOME}/dv/discourse_src`.
+
+`--sync` keeps the container and host codebases synchronized after the initial extract by watching for changes in both environments (press `Ctrl+C` to exit). `--debug` adds verbose logging while in sync mode. These flags cannot be combined with `--chdir` or `--echo-cd`.
+
+Note: sync mode requires `inotifywait` to be available inside the container (included in latest Dockerfile used here).
+
+Examples:
+
+```bash
+# Perform a one-off extract
+dv extract
+
+# Start continuous two-way sync with verbose logging
+dv extract --sync --debug
+```
 
 ### dv extract plugin
 Extract changes for a single plugin from the running container. This is useful when a plugin is its own git repository under `/var/www/discourse/plugins`.

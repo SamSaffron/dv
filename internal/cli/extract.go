@@ -24,6 +24,15 @@ var extractCmd = &cobra.Command{
 		// Flags controlling post-extract behavior and output
 		chdir, _ := cmd.Flags().GetBool("chdir")
 		echoCd, _ := cmd.Flags().GetBool("echo-cd")
+		syncMode, _ := cmd.Flags().GetBool("sync")
+		syncDebug, _ := cmd.Flags().GetBool("debug")
+
+		if syncMode && chdir {
+			return fmt.Errorf("--sync cannot be combined with --chdir")
+		}
+		if syncMode && echoCd {
+			return fmt.Errorf("--sync cannot be combined with --echo-cd")
+		}
 
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -61,7 +70,11 @@ var extractCmd = &cobra.Command{
 			return err
 		}
 		if strings.TrimSpace(status) == "" {
-			return fmt.Errorf("no changes detected in %s", work)
+			if syncMode {
+				status = ""
+			} else {
+				return fmt.Errorf("no changes detected in %s", work)
+			}
 		}
 
 		// Configure output behavior. When --echo-cd is requested, suppress normal output so
@@ -234,6 +247,21 @@ var extractCmd = &cobra.Command{
 		fmt.Fprintf(logOut, "📊 Files changed: %d\n", changedCount)
 		fmt.Fprintf(logOut, "🎯 Base commit: %s\n", commit)
 
+		if syncMode {
+			if changedCount == 0 {
+				fmt.Fprintln(logOut, "No pending changes detected; watching for new modifications...")
+			}
+			fmt.Fprintln(logOut, "🔄 Entering sync mode; press Ctrl+C to stop.")
+			return runExtractSync(cmd, syncOptions{
+				containerName:    name,
+				containerWorkdir: work,
+				localRepo:        localRepo,
+				logOut:           logOut,
+				errOut:           cmd.ErrOrStderr(),
+				debug:            syncDebug,
+			})
+		}
+
 		// Optionally drop the user into a subshell rooted at the extracted repo
 		if chdir {
 			shell := os.Getenv("SHELL")
@@ -256,6 +284,8 @@ func init() {
 	extractCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
 	extractCmd.Flags().Bool("chdir", false, "Open a subshell in the extracted repo directory after completion")
 	extractCmd.Flags().Bool("echo-cd", false, "Print 'cd <path>' suitable for eval; suppress other output")
+	extractCmd.Flags().Bool("sync", false, "Watch for changes and synchronize container ↔ host")
+	extractCmd.Flags().Bool("debug", false, "Verbose logging for sync mode")
 }
 
 func runCmdCapture(stdout, stderr io.Writer, name string, args ...string) error {

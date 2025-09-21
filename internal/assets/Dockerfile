@@ -5,7 +5,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends vim ripgrep zip
+RUN apt-get install -y --no-install-recommends vim ripgrep zip inotify-tools
 
 RUN npm i -g @openai/codex
 RUN npm i -g @google/gemini-cli

@@ -44,6 +44,8 @@ This guide documents the repository purpose, key files, and operational guidelin
   - `dv enter` (interactive shell)
 - Manage containers via `dv new|select|list|rename`
 - Export changes with `dv extract`, then commit in `${XDG_DATA_HOME}/dv/discourse_src`
+- Use `dv extract --sync` (optionally `--debug`) to keep the host and container code trees synchronized in real time; press `Ctrl+C` to stop sync mode
+- Ensure the container has `inotifywait` available (install the `inotify-tools` package or equivalent) before starting sync mode
 - If host port conflicts, use `--host-port` or stop conflicting service
 
 ### Go code hygiene
