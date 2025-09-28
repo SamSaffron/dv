@@ -312,7 +312,7 @@ var agentRules = map[string]agentRule{
 	"codex": {
 		interactive: func() []string { return []string{"codex"} },
 		withPrompt:  func(p string) []string { return []string{"codex", "exec", p} },
-		defaults:    []string{"--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
+		defaults:    []string{"--search", "--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
 	},
 	"aider": {
 		interactive: func() []string { return []string{"aider"} },
