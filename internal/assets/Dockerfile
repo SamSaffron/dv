@@ -102,5 +102,7 @@ ENV LEFTHOOK=1
 ENV DISCOURSE_DEV_ALLOW_ANON_TO_IMPERSONATE=1
 # allows qunit to work without CI being set to 1 which breaks a bunch of agents
 ENV DISCOURSE_DISABLE_BROWSER_SANDBOX=1
+ENV TESTEM_DEFAULT_BROWSER=chromium 
+ENV CHROME_BIN=/usr/bin/chromium
 
 ENTRYPOINT ["/sbin/boot"]
