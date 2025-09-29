@@ -274,6 +274,9 @@ func buildAgentInteractive(agent string) []string {
 		if len(rule.defaults) > 0 {
 			base = injectDefaults(base, rule.defaults)
 		}
+		if len(rule.interactiveDefaults) > 0 {
+			base = injectDefaults(base, rule.interactiveDefaults)
+		}
 		return base
 	}
 	return []string{agent}
@@ -298,9 +301,10 @@ func injectDefaults(argv []string, defaults []string) []string {
 
 // agentRules defines how to run each supported agent.
 type agentRule struct {
-	interactive func() []string
-	withPrompt  func(prompt string) []string
-	defaults    []string
+	interactive         func() []string
+	withPrompt          func(prompt string) []string
+	defaults            []string
+	interactiveDefaults []string
 }
 
 var agentRules = map[string]agentRule{
@@ -312,7 +316,8 @@ var agentRules = map[string]agentRule{
 	"codex": {
 		interactive: func() []string { return []string{"codex"} },
 		withPrompt:  func(p string) []string { return []string{"codex", "exec", p} },
-		defaults:    []string{"--search", "--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
+		defaults:    []string{"--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
+		interactiveDefaults: []string{"--search"},
 	},
 	"aider": {
 		interactive: func() []string { return []string{"aider"} },

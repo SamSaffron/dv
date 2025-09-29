@@ -19,7 +19,8 @@ RUN sudo -H -u discourse /bin/bash -lc 'curl -fsS https://cursor.com/install | b
 
 RUN chown discourse:discourse /var/www
 RUN sudo -H -u discourse /bin/bash -lc 'git clone https://github.com/discourse/discourse.git /var/www/discourse'
-RUN sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bundle && pnpm install'
+RUN sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bundle'
+RUN sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && pnpm install'
 
 RUN tee /tmp/seed_users.rb > /dev/null <<'EOF'
 u = User.new(username: "admin", email: "admin@example.com")
