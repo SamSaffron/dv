@@ -314,9 +314,9 @@ var agentRules = map[string]agentRule{
 		defaults:    []string{"-f"},
 	},
 	"codex": {
-		interactive: func() []string { return []string{"codex"} },
-		withPrompt:  func(p string) []string { return []string{"codex", "exec", p} },
-		defaults:    []string{"--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
+		interactive:         func() []string { return []string{"codex"} },
+		withPrompt:          func(p string) []string { return []string{"codex", "--search", "exec", p} },
+		defaults:            []string{"--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
 		interactiveDefaults: []string{"--search"},
 	},
 	"aider": {
