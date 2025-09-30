@@ -274,9 +274,6 @@ func buildAgentInteractive(agent string) []string {
 		if len(rule.defaults) > 0 {
 			base = injectDefaults(base, rule.defaults)
 		}
-		if len(rule.interactiveDefaults) > 0 {
-			base = injectDefaults(base, rule.interactiveDefaults)
-		}
 		return base
 	}
 	return []string{agent}
@@ -288,23 +285,16 @@ func injectDefaults(argv []string, defaults []string) []string {
 	}
 	out := make([]string, 0, len(argv)+len(defaults))
 	out = append(out, argv[0])
-	// If the command has a subcommand as argv[1] (heuristic: not a flag), keep it before flags
-	startIdx := 1
-	if len(argv) > 1 && !strings.HasPrefix(argv[1], "-") {
-		out = append(out, argv[1])
-		startIdx = 2
-	}
 	out = append(out, defaults...)
-	out = append(out, argv[startIdx:]...)
+	out = append(out, argv[1:]...)
 	return out
 }
 
 // agentRules defines how to run each supported agent.
 type agentRule struct {
-	interactive         func() []string
-	withPrompt          func(prompt string) []string
-	defaults            []string
-	interactiveDefaults []string
+	interactive func() []string
+	withPrompt  func(prompt string) []string
+	defaults    []string
 }
 
 var agentRules = map[string]agentRule{
@@ -314,10 +304,9 @@ var agentRules = map[string]agentRule{
 		defaults:    []string{"-f"},
 	},
 	"codex": {
-		interactive:         func() []string { return []string{"codex"} },
-		withPrompt:          func(p string) []string { return []string{"codex", "--search", "exec", p} },
-		defaults:            []string{"--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
-		interactiveDefaults: []string{"--search"},
+		interactive: func() []string { return []string{"codex"} },
+		withPrompt:  func(p string) []string { return []string{"codex", "exec", "-s", "danger-full-access", p} },
+		defaults:    []string{"--search", "--dangerously-bypass-approvals-and-sandbox", "--sandbox", "danger-full-access", "-c", "model_reasoning_effort=high", "-m", "gpt-5-codex"},
 	},
 	"aider": {
 		interactive: func() []string { return []string{"aider"} },
