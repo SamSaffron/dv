@@ -553,8 +553,7 @@ func (s *extractSync) copyContainerToHost(rel string) error {
 		return err
 	}
 	containerPath := path.Join(s.workdir, rel)
-	tmpDir := filepath.Dir(hostPath)
-	return docker.CopyFromContainer(s.containerName, containerPath, tmpDir)
+	return docker.CopyFromContainer(s.containerName, containerPath, hostPath)
 }
 
 func (s *extractSync) removeInContainer(rel string) error {
