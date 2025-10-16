@@ -429,9 +429,7 @@ func parseStatusOutput(out string) []statusEntry {
 		}
 		x := rune(line[0])
 		y := rune(line[1])
-		if x == '?' && y == '?' {
-			continue
-		}
+		// Include untracked files (??), as they may have been extracted but are outside git tree
 		rest := strings.TrimSpace(line[3:])
 		entry := statusEntry{staged: x, unstaged: y}
 		if strings.Contains(rest, " -> ") {
@@ -467,6 +465,7 @@ func buildTrackedChanges(entries []statusEntry) []trackedChange {
 			out = append(out, trackedChange{kind: changeDelete, path: path})
 			continue
 		}
+		// Treat all other changes (including untracked files ??) as modifications
 		out = append(out, trackedChange{kind: changeModify, path: e.path})
 	}
 	return out
