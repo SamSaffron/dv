@@ -7,8 +7,6 @@
 
 set -euo pipefail
 
-DEFAULT_REPO="SamSaffron/dv"
-
 usage() {
     cat <<USAGE
 Usage: $0 [--auto | <version>]
@@ -26,43 +24,19 @@ require_clean_worktree() {
     fi
 }
 
-detect_repo() {
-    local remote
-    remote=$(git remote get-url origin 2>/dev/null || true)
-    if [[ $remote =~ github.com[:/][^/]+/[^/]+(.git)?$ ]]; then
-        remote=${remote%.git}
-        remote=${remote##*@github.com:}
-        remote=${remote##*github.com/}
-        printf '%s\n' "$remote"
-        return
-    fi
-    printf '%s\n' "$DEFAULT_REPO"
-}
-
 fetch_latest_release_tag() {
-    local repo tag
-    repo=$(detect_repo)
-    if command -v curl >/dev/null 2>&1; then
-        tag=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
-            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-        if [ -n "$tag" ]; then
-            printf '%s\n' "$tag"
-            return
-        fi
+    # Fetch tags from remote to ensure we have the latest
+    if git remote | grep -qx "origin"; then
+        git fetch --quiet --tags origin || true
+    else
+        git fetch --quiet --tags || true
     fi
-
-    # Fallback to local tags (ensure they're up to date if possible)
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-        if git remote | grep -qx "origin"; then
-            git fetch --quiet --tags origin || true
-        else
-            git fetch --quiet --tags || true
-        fi
-        tag=$(git tag -l "v*" --sort=v:refname | tail -n1)
-        if [ -n "$tag" ]; then
-            printf '%s\n' "$tag"
-            return
-        fi
+    
+    # Get the latest version tag
+    local tag
+    tag=$(git tag -l "v*" --sort=v:refname | tail -n1)
+    if [ -n "$tag" ]; then
+        printf '%s\n' "$tag"
     fi
 }
 
