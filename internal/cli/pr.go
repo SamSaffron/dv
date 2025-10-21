@@ -153,46 +153,8 @@ var prCmd = &cobra.Command{
 
 		// Build shell script to fetch and checkout PR branch safely
 		// Use FETCH_HEAD flow and force local branch update to pr-<num>
-		script := strings.Join([]string{
-			"set -euo pipefail",
-			"cleanup() { echo 'Starting services (as root): unicorn and ember-cli'; sudo /usr/bin/sv start unicorn || sudo sv start unicorn || true; sudo /usr/bin/sv start ember-cli || sudo sv start ember-cli || true; }",
-			"trap cleanup EXIT",
-			"echo 'Cleaning working tree...'",
-			"git reset --hard",
-			"git clean -fd",
-			"echo 'Ensuring full history is available (unshallow if needed)...'",
-			"if [ -f .git/shallow ]; then git fetch origin --tags --prune --unshallow; else git fetch origin --tags --prune; fi",
-			fmt.Sprintf("echo 'Fetching PR #%d from origin...'", prNumber),
-			fmt.Sprintf("git fetch origin pull/%d/head", prNumber),
-			fmt.Sprintf("git checkout -B pr-%d FETCH_HEAD", prNumber),
-			"echo 'Current HEAD:'",
-			"git --no-pager log --oneline -n 1",
-			"echo 'Reinstalling dependencies (bundle and pnpm) if needed...'",
-			// Best-effort; do not fail the whole command if these fail
-			"(bundle check || bundle install) || true",
-			"(command -v pnpm >/dev/null 2>&1 && pnpm install) || true",
-			"echo 'Stopping services (as root): unicorn and ember-cli'",
-			"sudo -n true 2>/dev/null || true",
-			"sudo /usr/bin/sv stop unicorn || sudo sv stop unicorn || true",
-			"sudo /usr/bin/sv stop ember-cli || sudo sv stop ember-cli || true",
-			"echo 'Resetting and migrating databases (development and test)...'",
-			"MIG_LOG_DEV=/tmp/dv-migrate-dev-$(date +%s).log",
-			"MIG_LOG_TEST=/tmp/dv-migrate-test-$(date +%s).log",
-			"(bin/rake db:drop || true)",
-			"bin/rake db:create",
-			"echo \"Migrating dev DB (output -> $MIG_LOG_DEV)\"",
-			"bin/rake db:migrate > \"$MIG_LOG_DEV\" 2>&1",
-			"echo \"Migrating test DB (output -> $MIG_LOG_TEST)\"",
-			"RAILS_ENV=test bin/rake db:migrate > \"$MIG_LOG_TEST\" 2>&1",
-			"bundle",
-			"pnpm install",
-			"echo 'Seeding users...'",
-			"bin/rails r /tmp/seed_users.rb || true",
-			"echo 'Migration logs:'",
-			"echo \"  dev : $MIG_LOG_DEV\"",
-			"echo \"  test: $MIG_LOG_TEST\"",
-			"echo 'Done.'",
-		}, "\n")
+		checkoutCmds := buildPRCheckoutCommands(prNumber)
+		script := buildDiscourseResetScript(checkoutCmds)
 
 		// Run interactively to stream output to the user
 		argv := []string{"bash", "-lc", script}

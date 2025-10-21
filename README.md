@@ -210,6 +210,57 @@ dv extract
 dv extract --sync --debug
 ```
 
+### dv pr
+Checkout a GitHub pull request in the container and reset the development environment.
+
+```bash
+dv pr [--name NAME] NUMBER
+```
+
+Notes:
+- Fetches and checks out the specified PR into a local branch `pr-<NUMBER>`.
+- Performs a full database reset and migration (development and test databases).
+- Reinstalls dependencies (bundle and pnpm).
+- Seeds test users.
+- Supports TAB completion with PR numbers and titles from GitHub API.
+- Only works with containers using the `discourse` image kind.
+
+Examples:
+```bash
+# Checkout PR #12345
+dv pr 12345
+
+# Use TAB completion to search and select a PR
+dv pr <TAB>
+```
+
+### dv branch
+Checkout a git branch in the container and reset the development environment.
+
+```bash
+dv branch [--name NAME] BRANCH
+```
+
+Notes:
+- Checks out the specified branch and pulls latest changes.
+- Performs a full database reset and migration (development and test databases).
+- Reinstalls dependencies (bundle and pnpm).
+- Seeds test users.
+- Supports TAB completion(e.g., `dv branch me<TAB>` queries only branches starting with "me").
+- Only works with containers using the `discourse` image kind.
+
+Examples:
+```bash
+# Checkout main branch
+dv branch main
+
+# Use TAB completion to list and select a branch
+dv branch <TAB>
+
+# Checkout a feature branch
+dv branch feature/my-feature
+```
+
 ### dv extract plugin
 Extract changes for a single plugin from the running container. This is useful when a plugin is its own git repository under `/var/www/discourse/plugins`.
 
