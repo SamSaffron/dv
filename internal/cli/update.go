@@ -66,6 +66,7 @@ var updateAgentsCmd = &cobra.Command{
 			{label: "OpenAI Codex CLI", command: "npm install -g @openai/codex", runAsRoot: true},
 			{label: "Google Gemini CLI", command: "npm install -g @google/gemini-cli", runAsRoot: true},
 			{label: "Crush CLI", command: "npm install -g @charmland/crush", runAsRoot: true},
+			{label: "Github CLI", command: "npm install -g @github/copilot", runAsRoot: true},
 			{label: "OpenCode AI", command: "npm install -g opencode-ai@latest", runAsRoot: true},
 			{label: "Amp CLI", command: "npm install -g @sourcegraph/amp", runAsRoot: true},
 			{label: "Claude CLI", command: "curl -fsSL https://claude.ai/install.sh | bash", useUserPaths: true},
