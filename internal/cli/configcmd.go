@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -77,10 +79,57 @@ var configShowCmd = &cobra.Command{
 	},
 }
 
+var configEditCmd = &cobra.Command{
+	Use:   "edit",
+	Short: "Edit config file in your editor",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		configDir, err := xdg.ConfigDir()
+		if err != nil {
+			return err
+		}
+		// Ensure config exists
+		_, err = config.LoadOrCreate(configDir)
+		if err != nil {
+			return err
+		}
+
+		configPath := config.Path(configDir)
+		editor := getEditor()
+
+		editorCmd := exec.Command(editor, configPath)
+		editorCmd.Stdin = os.Stdin
+		editorCmd.Stdout = os.Stdout
+		editorCmd.Stderr = os.Stderr
+
+		return editorCmd.Run()
+	},
+}
+
+var configResetCmd = &cobra.Command{
+	Use:   "reset",
+	Short: "Reset config to default values",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		configDir, err := xdg.ConfigDir()
+		if err != nil {
+			return err
+		}
+
+		cfg := config.Default()
+		if err := config.Save(configDir, cfg); err != nil {
+			return err
+		}
+
+		fmt.Fprintln(cmd.OutOrStdout(), "Config reset to default values")
+		return nil
+	},
+}
+
 func init() {
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configShowCmd)
+	configCmd.AddCommand(configEditCmd)
+	configCmd.AddCommand(configResetCmd)
 }
 
 func getConfigField(cfg config.Config, key string) (string, error) {
@@ -138,4 +187,19 @@ func setConfigField(cfg *config.Config, key, val string) error {
 		return fmt.Errorf("unknown key: %s", key)
 	}
 	return nil
+}
+
+// getEditor returns the user's preferred editor based on environment variables
+// or a sensible default for the platform.
+func getEditor() string {
+	// Check VISUAL first (for full-screen editors)
+	if editor := os.Getenv("VISUAL"); editor != "" {
+		return editor
+	}
+	// Fall back to EDITOR
+	if editor := os.Getenv("EDITOR"); editor != "" {
+		return editor
+	}
+	// Default to vi (available on virtually all Unix systems)
+	return "vi"
 }
