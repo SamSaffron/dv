@@ -64,6 +64,12 @@ Press Ctrl+C to stop exposing.`,
 			return fmt.Errorf("no non-localhost network interfaces found")
 		}
 
+		// Find an available port for all interfaces
+		availablePort, err := findAvailablePort(ips, port)
+		if err != nil {
+			return fmt.Errorf("failed to find available port: %w", err)
+		}
+
 		// Start proxies for each IP
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -75,7 +81,7 @@ Press Ctrl+C to stop exposing.`,
 			wg.Add(1)
 			go func(ip string) {
 				defer wg.Done()
-				if err := startProxy(ctx, ip, port); err != nil {
+				if err := startProxy(ctx, ip, availablePort, port); err != nil {
 					errChan <- fmt.Errorf("proxy on %s: %w", ip, err)
 				}
 			}(ip)
@@ -86,7 +92,7 @@ Press Ctrl+C to stop exposing.`,
 		fmt.Fprintln(cmd.OutOrStdout(), "  From your device, visit:")
 		for _, ip := range ips {
 			ifaceName := getInterfaceName(ip)
-			fmt.Fprintf(cmd.OutOrStdout(), "  http://%s:%d", ip, port)
+			fmt.Fprintf(cmd.OutOrStdout(), "  http://%s:%d", ip, availablePort)
 			if ifaceName != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), " (%s)", ifaceName)
 			}
@@ -182,6 +188,29 @@ func getNonLocalhostIPs() ([]string, error) {
 	return ips, nil
 }
 
+// findAvailablePort finds a port that's available on all given IPs
+// If the preferred port is available on all IPs, it returns that port.
+// Otherwise, it tries ports starting from the preferred port + 1.
+func findAvailablePort(ips []string, preferredPort int) (int, error) {
+	const maxAttempts = 100
+	for port := preferredPort; port < preferredPort+maxAttempts; port++ {
+		allAvailable := true
+		for _, ip := range ips {
+			addr := fmt.Sprintf("%s:%d", ip, port)
+			listener, err := net.Listen("tcp", addr)
+			if err != nil {
+				allAvailable = false
+				break
+			}
+			listener.Close()
+		}
+		if allAvailable {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no available port found after %d attempts starting from %d", maxAttempts, preferredPort)
+}
+
 // getInterfaceName returns a friendly name for the interface with the given IP
 func getInterfaceName(targetIP string) string {
 	ifaces, err := net.Interfaces()
@@ -220,9 +249,9 @@ func getInterfaceName(targetIP string) string {
 	return ""
 }
 
-// startProxy starts a TCP proxy from listenIP:port to localhost:port
-func startProxy(ctx context.Context, listenIP string, port int) error {
-	addr := fmt.Sprintf("%s:%d", listenIP, port)
+// startProxy starts a TCP proxy from listenIP:listenPort to localhost:targetPort
+func startProxy(ctx context.Context, listenIP string, listenPort int, targetPort int) error {
+	addr := fmt.Sprintf("%s:%d", listenIP, listenPort)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -249,16 +278,16 @@ func startProxy(ctx context.Context, listenIP string, port int) error {
 			}
 		}
 
-		go handleConnection(ctx, conn, port)
+		go handleConnection(ctx, conn, targetPort)
 	}
 }
 
-// handleConnection proxies a connection to localhost:port
-func handleConnection(ctx context.Context, clientConn net.Conn, port int) {
+// handleConnection proxies a connection to localhost:targetPort
+func handleConnection(ctx context.Context, clientConn net.Conn, targetPort int) {
 	defer clientConn.Close()
 
 	// Connect to localhost
-	targetAddr := fmt.Sprintf("localhost:%d", port)
+	targetAddr := fmt.Sprintf("localhost:%d", targetPort)
 	serverConn, err := net.Dial("tcp", targetAddr)
 	if err != nil {
 		return
