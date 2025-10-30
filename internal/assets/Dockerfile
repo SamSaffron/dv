@@ -5,7 +5,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends vim ripgrep zip inotify-tools
+RUN apt-get install -y --no-install-recommends vim ripgrep zip inotify-tools chromium
 
 RUN chown discourse:discourse /var/www
 RUN sudo -H -u discourse /bin/bash -lc 'git clone https://github.com/discourse/discourse.git /var/www/discourse'
@@ -103,7 +103,7 @@ ENV LEFTHOOK=1
 ENV DISCOURSE_DEV_ALLOW_ANON_TO_IMPERSONATE=1
 # allows qunit to work without CI being set to 1 which breaks a bunch of agents
 ENV DISCOURSE_DISABLE_BROWSER_SANDBOX=1
-ENV TESTEM_DEFAULT_BROWSER=chromium 
+ENV TESTEM_DEFAULT_BROWSER=Chromium 
 ENV CHROME_BIN=/usr/bin/chromium
 
 ENTRYPOINT ["/sbin/boot"]
