@@ -15,9 +15,16 @@ import (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start [--reset] [--name NAME] [--image NAME] [--host-starting-port N] [--container-port N]",
+	Use:   "start [name] [--reset] [--image NAME] [--host-starting-port N] [--container-port N]",
 	Short: "Create or start a container for the selected image",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MaximumNArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Complete container name for the first positional argument
+		if len(args) == 0 {
+			return completeAgentNames(cmd, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -29,7 +36,11 @@ var startCmd = &cobra.Command{
 		}
 
 		reset, _ := cmd.Flags().GetBool("reset")
+		// Priority: positional arg > --name flag > config
 		name, _ := cmd.Flags().GetString("name")
+		if len(args) > 0 {
+			name = args[0]
+		}
 		imageOverride, _ := cmd.Flags().GetString("image")
 		if name == "" {
 			name = currentAgentName(cfg)

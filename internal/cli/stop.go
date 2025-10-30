@@ -11,8 +11,16 @@ import (
 )
 
 var stopCmd = &cobra.Command{
-	Use:   "stop",
+	Use:   "stop [name]",
 	Short: "Stop the container",
+	Args:  cobra.MaximumNArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Complete container name for the first positional argument
+		if len(args) == 0 {
+			return completeAgentNames(cmd, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -23,8 +31,11 @@ var stopCmd = &cobra.Command{
 			return err
 		}
 
+		// Priority: positional arg > --name flag > config
 		name, _ := cmd.Flags().GetString("name")
-		if name == "" {
+		if len(args) > 0 {
+			name = args[0]
+		} else if name == "" {
 			name = currentAgentName(cfg)
 		}
 
