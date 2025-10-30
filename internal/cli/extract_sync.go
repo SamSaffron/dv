@@ -305,12 +305,23 @@ func (s *extractSync) processHostChanges(paths []string) error {
 		return nil
 	}
 	s.debugf("host events: %s", strings.Join(paths, ", "))
+
+	// Ask git about these paths - it will filter out gitignored files
 	entries, err := gitStatusPorcelainHost(s.localRepo, paths)
 	if err != nil {
 		return err
 	}
+
+	// Track which paths git reported as changed
+	gitReported := make(map[string]bool)
+
 	changes := buildTrackedChanges(entries)
 	for _, change := range changes {
+		gitReported[change.path] = true
+		if change.oldPath != "" {
+			gitReported[change.oldPath] = true
+		}
+
 		if change.kind == changeRename && change.oldPath != "" {
 			if shouldIgnoreRelative(change.oldPath) {
 				continue
@@ -341,6 +352,65 @@ func (s *extractSync) processHostChanges(paths []string) error {
 			fmt.Fprintf(s.logOut, "host → container: updated %s\n", change.path)
 		}
 	}
+
+	// For paths the watcher reported but git didn't, check if they need sync
+	for _, rel := range paths {
+		if gitReported[rel] || shouldIgnoreRelative(rel) {
+			continue
+		}
+
+		// Check if file exists on host
+		hostPath := filepath.Join(s.localRepo, filepath.FromSlash(rel))
+		_, err := os.Stat(hostPath)
+		hostExists := err == nil
+
+		if !hostExists {
+			// File was deleted on host, remove from container if it exists there
+			// This handles both tracked and untracked file deletions
+			checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
+			out, _ := docker.ExecOutput(s.containerName, s.workdir, checkCmd)
+			if strings.Contains(out, "exists") {
+				// Check if file is gitignored - don't sync gitignored files
+				ignored, _ := s.isGitIgnored(s.localRepo, rel)
+				if ignored {
+					s.debugf("skipping deletion of %s (gitignored)", rel)
+					continue
+				}
+
+				if err := s.removeInContainer(rel); err != nil {
+					s.debugf("remove failed for %s: %v", rel, err)
+					continue
+				}
+				fmt.Fprintf(s.logOut, "host → container: removed %s\n", rel)
+			}
+			continue
+		}
+
+		// File exists, check if this file is tracked by git (not gitignored)
+		tracked, err := s.isTrackedByGit(s.localRepo, rel)
+		if err != nil || !tracked {
+			s.debugf("skipping %s (not tracked by git)", rel)
+			continue
+		}
+
+		// File is tracked but git status didn't report it (it's clean)
+		// Check if it actually differs from container (e.g., after git reset)
+		same, err := s.hashesMatch(rel)
+		if err != nil {
+			s.debugf("hash check failed for %s: %v", rel, err)
+			continue
+		}
+		if !same {
+			if err := s.copyHostToContainer(rel); err != nil {
+				s.debugf("copy failed for %s: %v", rel, err)
+				continue
+			}
+			fmt.Fprintf(s.logOut, "host → container: updated %s\n", rel)
+		} else {
+			s.debugf("host path %s already synchronized", rel)
+		}
+	}
+
 	return nil
 }
 
@@ -349,12 +419,23 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 		return nil
 	}
 	s.debugf("container events: %s", strings.Join(paths, ", "))
+
+	// Ask git about these paths - it will filter out gitignored files
 	entries, err := gitStatusPorcelainContainer(s.containerName, s.workdir, paths)
 	if err != nil {
 		return err
 	}
+
+	// Track which paths git reported as changed
+	gitReported := make(map[string]bool)
+
 	changes := buildTrackedChanges(entries)
 	for _, change := range changes {
+		gitReported[change.path] = true
+		if change.oldPath != "" {
+			gitReported[change.oldPath] = true
+		}
+
 		if change.kind == changeRename && change.oldPath != "" {
 			if shouldIgnoreRelative(change.oldPath) {
 				continue
@@ -385,6 +466,64 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 			fmt.Fprintf(s.logOut, "container → host: updated %s\n", change.path)
 		}
 	}
+
+	// For paths the watcher reported but git didn't, check if they need sync
+	for _, rel := range paths {
+		if gitReported[rel] || shouldIgnoreRelative(rel) {
+			continue
+		}
+
+		// Check if file exists in container
+		checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
+		out, _ := docker.ExecOutput(s.containerName, s.workdir, checkCmd)
+		containerExists := strings.Contains(out, "exists")
+
+		if !containerExists {
+			// File was deleted in container, remove from host if it exists there
+			// This handles both tracked and untracked file deletions
+			hostPath := filepath.Join(s.localRepo, filepath.FromSlash(rel))
+			if _, err := os.Stat(hostPath); err == nil {
+				// Check if file is gitignored - don't sync gitignored files
+				ignored, _ := s.isGitIgnoredInContainer(rel)
+				if ignored {
+					s.debugf("skipping deletion of %s (gitignored in container)", rel)
+					continue
+				}
+
+				if err := s.removeOnHost(rel); err != nil {
+					s.debugf("remove failed for %s: %v", rel, err)
+					continue
+				}
+				fmt.Fprintf(s.logOut, "container → host: removed %s\n", rel)
+			}
+			continue
+		}
+
+		// File exists, check if this file is tracked by git in container (not gitignored)
+		tracked, err := s.isTrackedByGitInContainer(rel)
+		if err != nil || !tracked {
+			s.debugf("skipping %s (not tracked by git in container)", rel)
+			continue
+		}
+
+		// File is tracked but git status didn't report it (it's clean)
+		// Check if it actually differs from host (e.g., after git reset)
+		same, err := s.hashesMatch(rel)
+		if err != nil {
+			s.debugf("hash check failed for %s: %v", rel, err)
+			continue
+		}
+		if !same {
+			if err := s.copyContainerToHost(rel); err != nil {
+				s.debugf("copy failed for %s: %v", rel, err)
+				continue
+			}
+			fmt.Fprintf(s.logOut, "container → host: updated %s\n", rel)
+		} else {
+			s.debugf("container path %s already synchronized", rel)
+		}
+	}
+
 	return nil
 }
 
@@ -504,11 +643,20 @@ func (s *extractSync) hostHash(rel string) (string, error) {
 }
 
 func (s *extractSync) containerHash(rel string) (string, error) {
+	// First check if file exists in container
+	checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
+	out, _ := docker.ExecOutput(s.containerName, s.workdir, checkCmd)
+	if !strings.Contains(out, "exists") {
+		// File doesn't exist in container
+		return "", nil
+	}
+
+	// File exists, get its hash
 	args := []string{"git", "hash-object", "--", rel}
 	out, err := docker.ExecOutput(s.containerName, s.workdir, args)
 	if err != nil {
 		msg := strings.TrimSpace(out)
-		if strings.Contains(msg, "does not exist") {
+		if strings.Contains(msg, "does not exist") || strings.Contains(msg, "No such file") {
 			return "", nil
 		}
 		return "", fmt.Errorf("git hash-object (container): %w: %s", err, msg)
@@ -660,6 +808,57 @@ func (s *extractSync) debugf(format string, args ...interface{}) {
 		return
 	}
 	fmt.Fprintf(s.logOut, "[debug] "+format+"\n", args...)
+}
+
+func (s *extractSync) isGitIgnored(repoDir, relPath string) (bool, error) {
+	cmd := exec.Command("git", "check-ignore", "-q", filepath.FromSlash(relPath))
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err == nil {
+		// Exit code 0 means file IS ignored
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *extractSync) isGitIgnoredInContainer(relPath string) (bool, error) {
+	_, err := docker.ExecOutput(s.containerName, s.workdir, []string{"git", "check-ignore", "-q", relPath})
+	if err == nil {
+		// Exit code 0 means file IS ignored
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *extractSync) isTrackedByGit(repoDir, relPath string) (bool, error) {
+	// First check if file is ignored by .gitignore
+	ignored, _ := s.isGitIgnored(repoDir, relPath)
+	if ignored {
+		return false, nil
+	}
+
+	// Not ignored, check if file is tracked
+	cmd := exec.Command("git", "ls-files", "--", filepath.FromSlash(relPath))
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false, nil // Not tracked or error
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+func (s *extractSync) isTrackedByGitInContainer(relPath string) (bool, error) {
+	// First check if file is ignored by .gitignore
+	ignored, _ := s.isGitIgnoredInContainer(relPath)
+	if ignored {
+		return false, nil
+	}
+
+	// Not ignored, check if file is tracked
+	out, err := docker.ExecOutput(s.containerName, s.workdir, []string{"git", "ls-files", "--", relPath})
+	if err != nil {
+		return false, nil // Not tracked or error
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 func shouldIgnoreRelative(rel string) bool {
