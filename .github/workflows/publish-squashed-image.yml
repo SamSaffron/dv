@@ -1,0 +1,46 @@
+name: Publish Squashed Image
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build dv CLI
+        run: go build -o dv ./cmd/dv
+
+      - name: Compute tags
+        run: echo "DATE_TAG=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
+
+      - name: Build squashed image
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+          DOCKER_BUILDKIT: 0
+        run: ./dv build --squash --tag samsaffron/discourse-dv:latest
+
+      - name: Tag image
+        run: docker tag samsaffron/discourse-dv:latest samsaffron/discourse-dv:$DATE_TAG
+
+      - name: Push image
+        run: |
+          docker push samsaffron/discourse-dv:latest
+          docker push samsaffron/discourse-dv:$DATE_TAG
