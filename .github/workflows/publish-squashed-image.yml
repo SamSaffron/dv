@@ -31,6 +31,17 @@ jobs:
       - name: Compute tags
         run: echo "DATE_TAG=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
+      - name: Enable Docker experimental mode
+        run: |
+          sudo mkdir -p /etc/docker
+          if [ -f /etc/docker/daemon.json ]; then
+            sudo jq '.experimental = true' /etc/docker/daemon.json > daemon.json.tmp
+            sudo mv daemon.json.tmp /etc/docker/daemon.json
+          else
+            echo '{"experimental": true}' | sudo tee /etc/docker/daemon.json >/dev/null
+          fi
+          sudo systemctl restart docker
+
       - name: Build squashed image
         env:
           DOCKER_CLI_EXPERIMENTAL: enabled
