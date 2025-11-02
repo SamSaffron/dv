@@ -31,22 +31,14 @@ jobs:
       - name: Compute tags
         run: echo "DATE_TAG=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
-      - name: Enable Docker experimental mode
-        run: |
-          sudo mkdir -p /etc/docker
-          if [ -f /etc/docker/daemon.json ]; then
-            sudo jq '.experimental = true' /etc/docker/daemon.json > daemon.json.tmp
-            sudo mv daemon.json.tmp /etc/docker/daemon.json
-          else
-            echo '{"experimental": true}' | sudo tee /etc/docker/daemon.json >/dev/null
-          fi
-          sudo systemctl restart docker
+      - name: Install docker-squash
+        run: pip install docker-squash
 
-      - name: Build squashed image
-        env:
-          DOCKER_CLI_EXPERIMENTAL: enabled
-          DOCKER_BUILDKIT: 0
-        run: ./dv build --squash --tag samsaffron/discourse-dv:latest
+      - name: Build image
+        run: ./dv build --tag samsaffron/discourse-dv:unsquashed
+
+      - name: Squash image
+        run: docker-squash samsaffron/discourse-dv:unsquashed -t samsaffron/discourse-dv:latest
 
       - name: Tag image
         run: docker tag samsaffron/discourse-dv:latest samsaffron/discourse-dv:$DATE_TAG

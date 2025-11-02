@@ -70,14 +70,10 @@ var buildCmd = &cobra.Command{
 		buildArgs, _ := cmd.Flags().GetStringArray("build-arg")
 		removeExisting, _ := cmd.Flags().GetBool("rm-existing")
 		overrideTag, _ := cmd.Flags().GetString("tag")
-		squash, _ := cmd.Flags().GetBool("squash")
 
 		pass := make([]string, 0, len(buildArgs)+1)
 		if noCache {
 			pass = append(pass, "--no-cache")
-		}
-		if squash {
-			pass = append(pass, "--squash")
 		}
 		for _, kv := range buildArgs {
 			pass = append(pass, "--build-arg", kv)
@@ -178,5 +174,4 @@ func init() {
 	buildCmd.Flags().StringArray("build-arg", nil, "Set build-time variables (KEY=VALUE)")
 	buildCmd.Flags().Bool("rm-existing", false, "Remove existing default container before building")
 	buildCmd.Flags().String("tag", "", "Override the Docker image tag for this build")
-	buildCmd.Flags().Bool("squash", false, "Request Docker to squash layers into a single layer (requires experimental features)")
 }
