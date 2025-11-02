@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -19,6 +21,7 @@ var configMcpCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	ValidArgs: []string{
 		"playwright",
+		"discourse",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
@@ -60,9 +63,6 @@ var configMcpCmd = &cobra.Command{
 		workdir := imgCfg.Workdir
 
 		mcpName := strings.ToLower(strings.TrimSpace(args[0]))
-		if mcpName != "playwright" {
-			return fmt.Errorf("unsupported MCP name: %s (supported: playwright)", mcpName)
-		}
 
 		// Prepare env pass-through so tools like 'claude' have credentials
 		envs := make([]string, 0, len(cfg.EnvPassthrough))
@@ -75,82 +75,14 @@ var configMcpCmd = &cobra.Command{
 			fmt.Fprintln(cmd.ErrOrStderr(), "Warning: ANTHROPIC_API_KEY is not set on host; 'claude' may fail.")
 		}
 
-		// For now we only support Claude registration of Playwright MCP
-		removeEchoCmd := "claude mcp remove -s user playwright"
-		removeCmd := removeEchoCmd + " || true"
-		registrationCmd := "claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --isolated --no-sandbox --headless --executable-path /usr/bin/chromium"
-
-		// Attempt removal first to allow updates
-		fmt.Fprintf(cmd.OutOrStdout(), "Ensuring no existing Claude MCP '%s' remains (safe to ignore failures)...\n", mcpName)
-		fmt.Fprintf(cmd.OutOrStdout(), "Running: %s\n\n", removeEchoCmd)
-		if err := docker.ExecInteractive(containerName, workdir, envs, []string{"bash", "-lc", removeCmd}); err != nil {
-			// Ignore errors from removal; proceed to add
+		switch mcpName {
+		case "playwright":
+			return configurePlaywrightMCP(cmd, containerName, workdir, envs)
+		case "discourse":
+			return configureDiscourseMCP(cmd, containerName, workdir, envs)
+		default:
+			return fmt.Errorf("unsupported MCP name: %s (supported: playwright, discourse)", mcpName)
 		}
-
-		fmt.Fprintf(cmd.OutOrStdout(), "Registering MCP '%s' with Claude inside container '%s' as 'discourse'...\n", mcpName, containerName)
-		fmt.Fprintf(cmd.OutOrStdout(), "Running: %s\n\n", registrationCmd)
-
-		// Run interactively to stream output to the user
-		argv := []string{"bash", "-lc", registrationCmd}
-		if err := docker.ExecInteractive(containerName, workdir, envs, argv); err != nil {
-			return err
-		}
-
-		// Also configure Codex CLI TOML at ~/.codex/config.toml
-		fmt.Fprintln(cmd.OutOrStdout(), "\nConfiguring Codex to use the Playwright MCP (updating ~/.codex/config.toml)...")
-
-		// Ensure directory exists inside container
-		_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.codex"})
-
-		// Detect existing config
-		existsOut, _ := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "test -f ~/.codex/config.toml && echo EXISTS || echo MISSING"})
-		hasConfig := strings.Contains(existsOut, "EXISTS")
-
-		// Prepare temporary file on host
-		tmpDir, err := os.MkdirTemp("", "codex-config-*")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(tmpDir)
-		hostCfg := filepath.Join(tmpDir, "config.toml")
-
-		var content string
-		if hasConfig {
-			// Copy existing file out
-			if err := docker.CopyFromContainer(containerName, "/home/discourse/.codex/config.toml", hostCfg); err != nil {
-				return fmt.Errorf("failed to copy existing Codex config: %w", err)
-			}
-			b, err := os.ReadFile(hostCfg)
-			if err != nil {
-				return err
-			}
-			content = string(b)
-		} else {
-			content = ""
-		}
-
-		// Construct Playwright MCP section
-		sectionHeader := "mcp_servers.playwright"
-		sectionBody := strings.Join([]string{
-			"[" + sectionHeader + "]",
-			"command = \"npx\"",
-			"args = [\"-y\", \"@playwright/mcp@latest\", \"--isolated\", \"--no-sandbox\", \"--headless\", \"--executable-path\", \"/usr/bin/chromium\"]",
-			"",
-		}, "\n")
-
-		updated := addOrReplaceTomlSection(content, sectionHeader, sectionBody)
-		if err := os.WriteFile(hostCfg, []byte(updated), 0o644); err != nil {
-			return err
-		}
-
-		// Copy updated config back into container and fix ownership
-		if err := docker.CopyToContainer(containerName, hostCfg, "/home/discourse/.codex/config.toml"); err != nil {
-			return fmt.Errorf("failed to copy Codex config into container: %w", err)
-		}
-		_, _ = docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", "/home/discourse/.codex/config.toml"})
-
-		fmt.Fprintln(cmd.OutOrStdout(), "Done.")
-		return nil
 	},
 }
 
@@ -216,4 +148,226 @@ func addOrReplaceTomlSection(existing string, sectionHeader string, sectionBody 
 	}
 	// Ensure trailing newline
 	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+}
+
+func configurePlaywrightMCP(cmd *cobra.Command, containerName, workdir string, envs []string) error {
+	mcpConfig := mcpConfiguration{
+		name:            "playwright",
+		registrationCmd: "claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --isolated --no-sandbox --headless --executable-path /usr/bin/chromium",
+		codexCommand:    "npx",
+		codexArgs:       []string{"-y", "@playwright/mcp@latest", "--isolated", "--no-sandbox", "--headless", "--executable-path", "/usr/bin/chromium"},
+	}
+	return configureMCP(cmd, containerName, workdir, envs, mcpConfig)
+}
+
+func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, envs []string) error {
+	const profilePath = "/home/discourse/.config/discourse-mcp/local.json"
+	const profileDir = "/home/discourse/.config/discourse-mcp"
+	const siteURL = "http://127.0.0.1:9292"
+	const apiKeyDescription = "dv discourse-mcp"
+
+	fmt.Fprintln(cmd.OutOrStdout(), "Preparing Discourse MCP profile with read/write access to local instance...")
+
+	if _, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + profileDir}); err != nil {
+		return fmt.Errorf("failed to ensure discourse-mcp config directory: %w", err)
+	}
+
+	readCmd := fmt.Sprintf("if [ -f %q ]; then cat %q; fi", profilePath, profilePath)
+	existingProfile, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", readCmd})
+	if err != nil {
+		return fmt.Errorf("failed to read existing MCP profile: %w", err)
+	}
+
+	profile := map[string]any{}
+	if strings.TrimSpace(existingProfile) != "" {
+		if err := json.Unmarshal([]byte(existingProfile), &profile); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: existing MCP profile is invalid JSON, regenerating it: %v\n", err)
+			profile = map[string]any{}
+		}
+	}
+
+	authPairs := extractAuthPairs(profile)
+	var pair map[string]any
+	for _, candidate := range authPairs {
+		if site, ok := candidate["site"].(string); ok && strings.EqualFold(site, siteURL) {
+			pair = candidate
+			break
+		}
+	}
+	if pair == nil {
+		pair = map[string]any{}
+		authPairs = append(authPairs, pair)
+	}
+
+	apiKey := ""
+	adminUsername := ""
+	if existing, ok := pair["api_key"].(string); ok {
+		apiKey = strings.TrimSpace(existing)
+	}
+	if existingUsername, ok := pair["api_username"].(string); ok {
+		adminUsername = strings.TrimSpace(existingUsername)
+	}
+	if apiKey == "" || adminUsername == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "Generating (or reusing) Discourse API key for admin user inside container...")
+		railsScript := `admin = User.where(admin: true).first; raise "No admin user found" if admin.nil?; key = ApiKey.find_by(description: "` + apiKeyDescription + `") || ApiKey.create!(description: "` + apiKeyDescription + `", created_by_id: admin.id, user_id: admin.id); puts key.key; puts admin.username`
+		keyOut, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "bin/rails runner '" + railsScript + "'"})
+		if err != nil {
+			return fmt.Errorf("failed to create Discourse API key: %w\nOutput: %s", err, keyOut)
+		}
+		lines := strings.Split(strings.TrimSpace(keyOut), "\n")
+		if len(lines) < 2 {
+			return fmt.Errorf("expected API key and username from rails runner, got: %s", keyOut)
+		}
+		apiKey = strings.TrimSpace(lines[len(lines)-2])
+		adminUsername = strings.TrimSpace(lines[len(lines)-1])
+		keyRe := regexp.MustCompile(`^[0-9a-f]{32,64}$`)
+		if !keyRe.MatchString(apiKey) {
+			return fmt.Errorf("unexpected API key format: %q", apiKey)
+		}
+		if adminUsername == "" {
+			return fmt.Errorf("received empty admin username from rails runner")
+		}
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(), "Reusing existing Discourse API key for admin user from MCP profile.")
+	}
+
+	pair["site"] = siteURL
+	pair["api_key"] = apiKey
+	pair["api_username"] = adminUsername
+	profile["auth_pairs"] = authPairs
+	profile["read_only"] = false
+	profile["allow_writes"] = true
+	profile["site"] = siteURL
+	if _, ok := profile["log_level"]; !ok {
+		profile["log_level"] = "info"
+	}
+
+	profileBytes, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal MCP profile: %w", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "discourse-mcp-profile-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpProfile := filepath.Join(tmpDir, "local.json")
+	if err := os.WriteFile(tmpProfile, profileBytes, 0o600); err != nil {
+		return fmt.Errorf("failed to write temporary MCP profile: %w", err)
+	}
+
+	if err := docker.CopyToContainer(containerName, tmpProfile, profilePath); err != nil {
+		return fmt.Errorf("failed to copy MCP profile into container: %w", err)
+	}
+	_, _ = docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", profilePath})
+
+	mcpConfig := mcpConfiguration{
+		name:            "discourse",
+		registrationCmd: fmt.Sprintf("claude mcp add -s user discourse -- npx -y @discourse/mcp@latest --profile %s", profilePath),
+		codexCommand:    "npx",
+		codexArgs:       []string{"-y", "@discourse/mcp@latest", "--profile", profilePath},
+	}
+
+	return configureMCP(cmd, containerName, workdir, envs, mcpConfig)
+}
+
+// mcpConfiguration holds the configuration for setting up an MCP server
+type mcpConfiguration struct {
+	name            string   // MCP server name (e.g., "playwright", "discourse")
+	registrationCmd string   // Command to register with Claude
+	codexCommand    string   // Command for Codex config
+	codexArgs       []string // Arguments for Codex config
+}
+
+// configureMCP registers an MCP server with both Claude and Codex
+func configureMCP(cmd *cobra.Command, containerName, workdir string, envs []string, mcpConfig mcpConfiguration) error {
+	const codexConfigPath = "/home/discourse/.codex/config.toml"
+
+	// Remove existing Claude MCP entry
+	removeEchoCmd := fmt.Sprintf("claude mcp remove -s user %s", mcpConfig.name)
+	removeCmd := removeEchoCmd + " || true"
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Ensuring no existing Claude MCP '%s' remains (safe to ignore failures)...\n", mcpConfig.name)
+	fmt.Fprintf(cmd.OutOrStdout(), "Running: %s\n\n", removeEchoCmd)
+	if err := docker.ExecInteractive(containerName, workdir, envs, []string{"bash", "-lc", removeCmd}); err != nil {
+		// Ignore errors from removal; proceed to add
+	}
+
+	// Register MCP with Claude
+	fmt.Fprintf(cmd.OutOrStdout(), "Registering MCP '%s' with Claude inside container '%s'...\n", mcpConfig.name, containerName)
+	fmt.Fprintf(cmd.OutOrStdout(), "Running: %s\n\n", mcpConfig.registrationCmd)
+
+	if err := docker.ExecInteractive(containerName, workdir, envs, []string{"bash", "-lc", mcpConfig.registrationCmd}); err != nil {
+		return err
+	}
+
+	// Configure Codex
+	fmt.Fprintf(cmd.OutOrStdout(), "\nConfiguring Codex to use the %s MCP (updating ~/.codex/config.toml)...\n", mcpConfig.name)
+
+	_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.codex"})
+	existsOut, _ := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "test -f " + codexConfigPath + " && echo EXISTS || echo MISSING"})
+	hasConfig := strings.Contains(existsOut, "EXISTS")
+
+	tmpDir, err := os.MkdirTemp("", "codex-config-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	hostCfg := filepath.Join(tmpDir, "config.toml")
+
+	var content string
+	if hasConfig {
+		if err := docker.CopyFromContainer(containerName, codexConfigPath, hostCfg); err != nil {
+			return fmt.Errorf("failed to copy existing Codex config: %w", err)
+		}
+		b, err := os.ReadFile(hostCfg)
+		if err != nil {
+			return err
+		}
+		content = string(b)
+	}
+
+	sectionHeader := fmt.Sprintf("mcp_servers.%s", mcpConfig.name)
+	argsJSON, err := json.Marshal(mcpConfig.codexArgs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal codex args: %w", err)
+	}
+	sectionBody := strings.Join([]string{
+		"[" + sectionHeader + "]",
+		fmt.Sprintf("command = %q", mcpConfig.codexCommand),
+		fmt.Sprintf("args = %s", string(argsJSON)),
+		"",
+	}, "\n")
+
+	updated := addOrReplaceTomlSection(content, sectionHeader, sectionBody)
+	if err := os.WriteFile(hostCfg, []byte(updated), 0o644); err != nil {
+		return err
+	}
+
+	if err := docker.CopyToContainer(containerName, hostCfg, codexConfigPath); err != nil {
+		return fmt.Errorf("failed to copy Codex config into container: %w", err)
+	}
+	_, _ = docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", codexConfigPath})
+
+	fmt.Fprintf(cmd.OutOrStdout(), "%s MCP configuration complete.\n", strings.Title(mcpConfig.name))
+	return nil
+}
+
+func extractAuthPairs(profile map[string]any) []map[string]any {
+	raw, ok := profile["auth_pairs"]
+	if !ok {
+		return []map[string]any{}
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return []map[string]any{}
+	}
+	pairs := make([]map[string]any, 0, len(arr))
+	for _, item := range arr {
+		if m, ok := item.(map[string]any); ok {
+			pairs = append(pairs, m)
+		}
+	}
+	return pairs
 }
