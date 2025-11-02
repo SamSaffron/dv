@@ -147,23 +147,12 @@ var runAgentCmd = &cobra.Command{
 			_, _ = docker.ExecAsRoot(name, workdir, []string{"chown", "discourse:discourse", containerDst})
 		}
 
-		// Prepare env pass-through like `enter`: only configured keys
-		envs := make([]string, 0, len(cfg.EnvPassthrough)+4)
-		for _, key := range cfg.EnvPassthrough {
-			if val, ok := os.LookupEnv(key); ok && strings.TrimSpace(val) != "" {
-				// docker exec -e KEY will copy host value
-				envs = append(envs, key)
-			}
-		}
-		// Ensure a sane runtime environment for discourse user
-		envs = append(envs,
-			"HOME=/home/discourse",
-			"USER=discourse",
-			"SHELL=/bin/bash",
-		)
-
 		// Parse args: first token is the agent name
 		agent := args[0]
+		agentLower := strings.ToLower(agent)
+
+		envs := buildAgentEnv(cfg, agentLower, cmd)
+
 		rest := args[1:]
 
 		// If user provided "--" treat everything after as raw agent args (no prompt wrapping)
@@ -255,6 +244,39 @@ func collectPromptInteractive(cmd *cobra.Command) (string, error) {
 	return strings.TrimSpace(pm.ta.Value()), nil
 }
 
+func buildAgentEnv(cfg config.Config, agent string, cmd *cobra.Command) []string {
+	if agent == "ccr" {
+		envs := make([]string, 0, 3)
+		if _, ok := os.LookupEnv("TERM"); ok {
+			envs = append(envs, "TERM")
+		}
+		if _, ok := os.LookupEnv("OPENROUTER_API_KEY"); ok {
+			envs = append(envs, "OPENROUTER_API_KEY")
+		} else {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Warning: OPENROUTER_API_KEY is not set on host; CCR may fail to authenticate.")
+		}
+		if _, ok := os.LookupEnv("OPENROUTER_KEY"); ok {
+			envs = append(envs, "OPENROUTER_KEY")
+		}
+		return envs
+	}
+
+	envs := make([]string, 0, len(cfg.EnvPassthrough)+3)
+	for _, key := range cfg.EnvPassthrough {
+		if val, ok := os.LookupEnv(key); ok && strings.TrimSpace(val) != "" {
+			// docker exec -e KEY will copy host value
+			envs = append(envs, key)
+		}
+	}
+	// Ensure a sane runtime environment for discourse user
+	envs = append(envs,
+		"HOME=/home/discourse",
+		"USER=discourse",
+		"SHELL=/bin/bash",
+	)
+	return envs
+}
+
 // buildAgentArgs uses internal, hard-coded rules per agent to construct argv.
 // If the agent is unknown, falls back to positional prompt.
 func buildAgentArgs(agent string, prompt string) []string {
@@ -302,6 +324,15 @@ var agentRules = map[string]agentRule{
 		interactive: func() []string { return []string{"cursor-agent"} },
 		withPrompt:  func(p string) []string { return []string{"cursor-agent", "-p", p} },
 		defaults:    []string{"-f"},
+	},
+	"ccr": {
+		interactive: func() []string {
+			return []string{"bash", "-c", "ccr stop 2>/dev/null || true; ccr code --dangerously-skip-permissions"}
+		},
+		withPrompt: func(p string) []string {
+			return []string{"bash", "-c", "ccr stop 2>/dev/null || true; ccr code --dangerously-skip-permissions"}
+		},
+		defaults: []string{},
 	},
 	"codex": {
 		interactive: func() []string { return []string{"codex"} },
@@ -416,7 +447,7 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m promptModel) View() string {
-	hint := "Ctrl+D to run • Esc to cancel"
+	hint := "Ctrl+D to run ? Esc to cancel"
 	box := lipBox(m.ta.View()+"\n"+hint, m.width, m.height)
 	return box
 }
