@@ -130,6 +130,24 @@ var configCcrCmd = &cobra.Command{
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		skipModelEval, _ := cmd.Flags().GetBool("skip-model-eval")
 		resetCache, _ := cmd.Flags().GetBool("reset-cache")
+		skipConfirmation, _ := cmd.Flags().GetBool("yes")
+
+		// Check for OPENROUTER_API_KEY early and warn if missing
+		apiKey := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
+		if apiKey == "" && !skipConfirmation {
+			fmt.Fprintln(cmd.ErrOrStderr(), "\n??  Warning: OPENROUTER_API_KEY environment variable is not set or is empty.")
+			fmt.Fprintln(cmd.ErrOrStderr(), "   CCR requires this API key to authenticate with OpenRouter.")
+			fmt.Fprintln(cmd.ErrOrStderr(), "   You can get your API key from: https://openrouter.ai/keys")
+			fmt.Fprintln(cmd.ErrOrStderr(), "\n   Set it with: export OPENROUTER_API_KEY=your_key_here")
+			fmt.Fprintf(cmd.ErrOrStderr(), "\nProceed anyway? (y/N): ")
+
+			var response string
+			fmt.Fscanln(cmd.InOrStdin(), &response)
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response != "y" && response != "yes" {
+				return fmt.Errorf("aborted")
+			}
+		}
 
 		cacheDir, err := xdg.CacheDir()
 		if err != nil {
@@ -424,6 +442,7 @@ func init() {
 	configCcrCmd.Flags().Bool("dry-run", false, "Print generated config without touching the container")
 	configCcrCmd.Flags().Bool("skip-model-eval", false, "Skip launching `ccr model` after writing config")
 	configCcrCmd.Flags().Bool("reset-cache", false, "Delete cached OpenRouter rankings before fetching")
+	configCcrCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt for missing OPENROUTER_API_KEY")
 	configCmd.AddCommand(configCcrCmd)
 }
 
@@ -533,6 +552,6 @@ func writeConfigToContainer(ccrCfg map[string]interface{}, containerName, workdi
 		return err
 	}
 
-	fmt.Println("\n✓ CCR config written to container")
+	fmt.Println("\n? CCR config written to container")
 	return nil
 }
