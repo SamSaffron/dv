@@ -31,14 +31,8 @@ jobs:
       - name: Compute tags
         run: echo "DATE_TAG=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
-      - name: Install docker-squash
-        run: pip install docker-squash
-
       - name: Build image
-        run: ./dv build --tag samsaffron/discourse-dv:unsquashed
-
-      - name: Squash image
-        run: docker-squash samsaffron/discourse-dv:unsquashed -t samsaffron/discourse-dv:latest
+        run: ./dv build --tag samsaffron/discourse-dv:latest
 
       - name: Tag image
         run: docker tag samsaffron/discourse-dv:latest samsaffron/discourse-dv:$DATE_TAG
