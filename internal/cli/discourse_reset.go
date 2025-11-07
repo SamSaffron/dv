@@ -68,11 +68,12 @@ func buildDiscourseResetScript(checkoutCmds []string) string {
 }
 
 // buildPRCheckoutCommands generates git commands to fetch and checkout a PR.
-func buildPRCheckoutCommands(prNumber int) []string {
+// It uses the actual branch name from GitHub to maintain branch identity.
+func buildPRCheckoutCommands(prNumber int, branchName string) []string {
 	return []string{
-		fmt.Sprintf("echo 'Fetching PR #%d from origin...'", prNumber),
+		fmt.Sprintf("echo 'Fetching PR #%d (branch: %s) from origin...'", prNumber, branchName),
 		fmt.Sprintf("git fetch origin pull/%d/head", prNumber),
-		fmt.Sprintf("git checkout -B pr-%d FETCH_HEAD", prNumber),
+		fmt.Sprintf("git checkout -B %s FETCH_HEAD", branchName),
 	}
 }
 

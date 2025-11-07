@@ -149,11 +149,32 @@ var prCmd = &cobra.Command{
 			return fmt.Errorf("'dv pr' is only supported for discourse image kind; current: %q", imgCfg.Kind)
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Checking out PR #%d in container '%s'...\n", prNumber, name)
+		// Determine owner/repo for fetching PR details
+		owner, repo := prSearchOwnerRepoFromContainer(cfg, name)
+		if owner == "" || repo == "" {
+			// Fallback to configured discourse repo
+			owner, repo = ownerRepoFromURL(cfg.DiscourseRepo)
+		}
+		if owner == "" || repo == "" {
+			return fmt.Errorf("unable to determine repository owner/name for fetching PR details")
+		}
 
-		// Build shell script to fetch and checkout PR branch safely
-		// Use FETCH_HEAD flow and force local branch update to pr-<num>
-		checkoutCmds := buildPRCheckoutCommands(prNumber)
+		// Fetch PR details to get the actual branch name
+		fmt.Fprintf(cmd.OutOrStdout(), "Fetching PR #%d details from GitHub...\n", prNumber)
+		prDetail, err := fetchPRDetail(owner, repo, prNumber)
+		if err != nil {
+			return fmt.Errorf("failed to fetch PR details: %w", err)
+		}
+
+		branchName := prDetail.Head.Ref
+		if branchName == "" {
+			return fmt.Errorf("PR #%d has no branch name (head.ref is empty)", prNumber)
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "Checking out PR #%d (%s) in container '%s'...\n", prNumber, branchName, name)
+
+		// Build shell script to fetch and checkout PR branch using the actual branch name
+		checkoutCmds := buildPRCheckoutCommands(prNumber, branchName)
 		script := buildDiscourseResetScript(checkoutCmds)
 
 		// Run interactively to stream output to the user
@@ -255,6 +276,44 @@ type ghPR struct {
 	Title     string    `json:"title"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Draft     bool      `json:"draft"`
+}
+
+type ghPRDetail struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Head   struct {
+		Ref  string `json:"ref"`
+		Repo struct {
+			CloneURL string `json:"clone_url"`
+		} `json:"repo"`
+	} `json:"head"`
+}
+
+// fetchPRDetail fetches details for a specific PR from GitHub API
+func fetchPRDetail(owner, repo string, prNumber int) (*ghPRDetail, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, prNumber)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "dv-cli")
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("GitHub API error: %s", resp.Status)
+	}
+	var pr ghPRDetail
+	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
+		return nil, err
+	}
+	return &pr, nil
 }
 
 // listRecentPRs queries GitHub REST API for recent PRs (state=all), paginated up to limit.
