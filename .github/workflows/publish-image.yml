@@ -32,7 +32,15 @@ jobs:
         run: echo "DATE_TAG=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
       - name: Build image
-        run: ./dv build --tag samsaffron/discourse-dv:latest
+        run: ./dv build --tag samsaffron/discourse-dv:latest > build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
 
       - name: Tag image
         run: docker tag samsaffron/discourse-dv:latest samsaffron/discourse-dv:$DATE_TAG
