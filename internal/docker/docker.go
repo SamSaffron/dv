@@ -3,13 +3,23 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"golang.org/x/term"
 )
+
+// BuildOptions controls how docker images are built.
+type BuildOptions struct {
+	ExtraArgs    []string // additional docker build args supplied by callers
+	ForceClassic bool     // skip buildx/BuildKit helpers and use legacy docker build
+	Builder      string   // optional buildx builder name
+	CacheDir     string   // optional local cache directory for buildx cache import/export
+}
 
 func Exists(name string) bool {
 	out, _ := exec.Command("bash", "-lc", "docker ps -aq -f name=^"+shellEscape(name)+"$").Output()
@@ -56,18 +66,104 @@ func Build(tag string, args []string) error {
 
 // BuildFrom builds a Docker image from a specific Dockerfile and context
 // directory. dockerfilePath may be absolute or relative; contextDir must be
-// a directory. Additional docker build arguments can be supplied via args.
-func BuildFrom(tag, dockerfilePath, contextDir string, args []string) error {
+// a directory.
+func BuildFrom(tag, dockerfilePath, contextDir string, opts BuildOptions) error {
 	if !filepath.IsAbs(dockerfilePath) {
 		// ensure relative dockerfile path is evaluated relative to contextDir
 		dockerfilePath = filepath.Join(contextDir, dockerfilePath)
 	}
+	if opts.ExtraArgs == nil {
+		opts.ExtraArgs = []string{}
+	}
+	if opts.Builder == "" {
+		if env := strings.TrimSpace(os.Getenv("DV_BUILDX_BUILDER")); env != "" {
+			opts.Builder = env
+		} else if env := strings.TrimSpace(os.Getenv("DV_BUILDER")); env != "" {
+			opts.Builder = env
+		}
+	}
+	if opts.CacheDir == "" {
+		opts.CacheDir = strings.TrimSpace(os.Getenv("DV_BUILDX_CACHE"))
+	}
+	if isTruthyEnv("DV_DISABLE_BUILD_CACHE") {
+		opts.CacheDir = ""
+	}
+
+	useClassic := opts.ForceClassic || isTruthyEnv("DV_DISABLE_BUILDX")
+	buildxOK := buildxAvailable()
+	if !useClassic && buildxOK {
+		return runBuildx(tag, dockerfilePath, contextDir, opts)
+	}
+	if !opts.ForceClassic && !buildxOK {
+		if err := buildxError(); err != nil {
+			fmt.Fprintf(os.Stderr, "buildx unavailable (%v); falling back to 'docker build'.\n", err)
+		} else {
+			fmt.Fprintln(os.Stderr, "buildx unavailable; falling back to 'docker build'.")
+		}
+	}
+	return runClassicBuild(tag, dockerfilePath, contextDir, opts.ExtraArgs)
+}
+
+func runClassicBuild(tag, dockerfilePath, contextDir string, args []string) error {
 	argv := []string{"build", "-t", tag, "-f", dockerfilePath}
 	argv = append(argv, args...)
 	argv = append(argv, contextDir)
 	cmd := exec.Command("docker", argv...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
 	return cmd.Run()
+}
+
+func runBuildx(tag, dockerfilePath, contextDir string, opts BuildOptions) error {
+	argv := []string{"buildx", "build", "--load", "-t", tag, "-f", dockerfilePath}
+	if builder := strings.TrimSpace(opts.Builder); builder != "" {
+		argv = append(argv, "--builder", builder)
+	}
+	if cacheDir := strings.TrimSpace(opts.CacheDir); cacheDir != "" {
+		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: unable to prepare cache dir %s: %v\n", cacheDir, err)
+		} else {
+			argv = append(argv, "--cache-from", fmt.Sprintf("type=local,src=%s", cacheDir))
+			argv = append(argv, "--cache-to", fmt.Sprintf("type=local,dest=%s,mode=max"))
+		}
+	}
+	argv = append(argv, opts.ExtraArgs...)
+	argv = append(argv, contextDir)
+	cmd := exec.Command("docker", argv...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	return cmd.Run()
+}
+
+var (
+	buildxOnce sync.Once
+	buildxOK   bool
+	buildxErr  error
+)
+
+func buildxAvailable() bool {
+	buildxOnce.Do(func() {
+		cmd := exec.Command("docker", "buildx", "version")
+		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+		buildxErr = cmd.Run()
+		buildxOK = buildxErr == nil
+	})
+	return buildxOK
+}
+
+func buildxError() error {
+	buildxAvailable()
+	return buildxErr
+}
+
+func isTruthyEnv(key string) bool {
+	val := strings.TrimSpace(os.Getenv(key))
+	switch strings.ToLower(val) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func ImageExists(tag string) bool {

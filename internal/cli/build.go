@@ -70,6 +70,10 @@ var buildCmd = &cobra.Command{
 		buildArgs, _ := cmd.Flags().GetStringArray("build-arg")
 		removeExisting, _ := cmd.Flags().GetBool("rm-existing")
 		overrideTag, _ := cmd.Flags().GetString("tag")
+		disableBuildKit, _ := cmd.Flags().GetBool("classic-build")
+		disableCacheShare, _ := cmd.Flags().GetBool("no-cache-share")
+		cacheDirOverride, _ := cmd.Flags().GetString("cache-dir")
+		builderName, _ := cmd.Flags().GetString("builder")
 
 		pass := make([]string, 0, len(buildArgs)+1)
 		if noCache {
@@ -160,8 +164,44 @@ var buildCmd = &cobra.Command{
 			}
 		}
 
+		var cacheDir string
+		cacheDirOverride = strings.TrimSpace(cacheDirOverride)
+		useCacheShare := !disableBuildKit && !noCache && !disableCacheShare
+		if useCacheShare {
+			cacheDir = strings.TrimSpace(cacheDirOverride)
+			if cacheDir == "" {
+				if dir, err := defaultBuildCacheDir(imageTag); err == nil {
+					cacheDir = dir
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "Warning: unable to determine cache directory: %v\n", err)
+				}
+			}
+		} else if cacheDirOverride != "" {
+			var reason string
+			switch {
+			case disableBuildKit:
+				reason = "--classic-build was provided"
+			case noCache:
+				reason = "--no-cache was provided"
+			case disableCacheShare:
+				reason = "--no-cache-share was provided"
+			default:
+				reason = "caching is disabled"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Warning: --cache-dir ignored because %s.\n", reason)
+		}
+		if cacheDir != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "BuildKit cache directory: %s\n", cacheDir)
+		}
+
 		fmt.Fprintf(cmd.OutOrStdout(), "Building Docker image as: %s\n", imageTag)
-		if err := docker.BuildFrom(imageTag, dockerfilePath, contextDir, pass); err != nil {
+		opts := docker.BuildOptions{
+			ExtraArgs:    pass,
+			ForceClassic: disableBuildKit,
+			Builder:      strings.TrimSpace(builderName),
+			CacheDir:     cacheDir,
+		}
+		if err := docker.BuildFrom(imageTag, dockerfilePath, contextDir, opts); err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), "Done.")
@@ -174,4 +214,8 @@ func init() {
 	buildCmd.Flags().StringArray("build-arg", nil, "Set build-time variables (KEY=VALUE)")
 	buildCmd.Flags().Bool("rm-existing", false, "Remove existing default container before building")
 	buildCmd.Flags().String("tag", "", "Override the Docker image tag for this build")
+	buildCmd.Flags().Bool("classic-build", false, "Use legacy 'docker build' instead of buildx/BuildKit helpers")
+	buildCmd.Flags().Bool("no-cache-share", false, "Skip persistent BuildKit cache import/export")
+	buildCmd.Flags().String("cache-dir", "", "Override the BuildKit cache directory (defaults to XDG data path)")
+	buildCmd.Flags().String("builder", "", "Specify a buildx builder (default: Docker's current builder)")
 }
