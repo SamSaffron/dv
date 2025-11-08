@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	ImageTag         string `json:"imageTag"`
 	DefaultContainer string `json:"defaultContainerName"`
 	Workdir          string `json:"workdir"`
+	CustomWorkdir    string `json:"customWorkdir,omitempty"`
 	// HostStartingPort is the first port to try on the host.
 	HostStartingPort    int      `json:"hostStartingPort"`
 	ContainerPort       int      `json:"containerPort"`
@@ -164,4 +166,23 @@ func valueOrDefault(value int, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+// EffectiveWorkdir returns the runtime working directory dv commands should use.
+// Priority:
+//  1. Custom override set via `dv config workdir`
+//  2. Per-image workdir
+//  3. Legacy global workdir
+//  4. Default /var/www/discourse
+func EffectiveWorkdir(cfg Config, img ImageConfig) string {
+	if w := strings.TrimSpace(cfg.CustomWorkdir); w != "" {
+		return path.Clean(w)
+	}
+	if w := strings.TrimSpace(img.Workdir); w != "" {
+		return w
+	}
+	if w := strings.TrimSpace(cfg.Workdir); w != "" {
+		return w
+	}
+	return "/var/www/discourse"
 }

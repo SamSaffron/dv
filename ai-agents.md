@@ -74,6 +74,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `dv run -- <command>` — Non-interactive execution (supports `--root`).
 - `dv enter` — Interactive login shell (copyFiles synced beforehand).
 - `dv run-agent/ra` — Run supported AI tooling with prompt/arg passthrough.
+- `dv config workdir [PATH|--reset]` — Override (or clear) the default container workdir used by `run`, `enter`, `run-agent`, and `extract`.
 
 ### Code Sync & Git Integration
 - `dv extract [--sync|--debug|--chdir|--echo-cd]` — Copy the container workspace into `${XDG_DATA_HOME}/dv/discourse_src`, optionally keep it bidirectionally synced or emit a `cd` command.
@@ -83,6 +84,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 
 ### Configuration, Metadata & Tooling
 - `dv config show|get|set KEY VALUE` — Manage JSON config (`selectedAgent`, env passthrough, copyFiles, etc.).
+- `dv config workdir [PATH|--reset]` — Set a custom entrypoint directory for interactive commands (handy for theme/plugin worktrees).
 - `dv config completion <shell>` — Install shell completions.
 - `dv config ccr` — Bootstrap Claude Code Router presets via OpenRouter/OpenAI rankings.
 - `dv config mcp NAME` — Configure Playwright/Discourse MCP servers inside the container (writes TOML, sets envs).

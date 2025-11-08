@@ -62,7 +62,7 @@ var extractCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		work := imgCfg.Workdir
+		work := config.EffectiveWorkdir(cfg, imgCfg)
 		// Check for changes
 		status, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git status --porcelain"})
 		if err != nil {

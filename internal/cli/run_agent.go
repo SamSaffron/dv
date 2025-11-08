@@ -125,27 +125,10 @@ var runAgentCmd = &cobra.Command{
 				return err
 			}
 		}
-		workdir := imgCfg.Workdir
+		workdir := config.EffectiveWorkdir(cfg, imgCfg)
 
 		// Copy configured files (auth, etc.) into the container as in `enter`
-		for hostSrc, containerDst := range cfg.CopyFiles {
-			hostPath := expandHostPath(hostSrc)
-			if hostPath == "" {
-				continue
-			}
-			if st, err := os.Stat(hostPath); err != nil || !st.Mode().IsRegular() {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Skipping copy (not found): %s -> %s\n", hostPath, containerDst)
-				continue
-			}
-			// Ensure destination directory exists inside container (as discourse user)
-			dstDir := filepath.Dir(containerDst)
-			_, _ = docker.ExecOutput(name, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
-			if err := docker.CopyToContainer(name, hostPath, containerDst); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hostPath, containerDst, err)
-				continue
-			}
-			_, _ = docker.ExecAsRoot(name, workdir, []string{"chown", "discourse:discourse", containerDst})
-		}
+		copyConfiguredFiles(cmd, cfg, name, workdir)
 
 		// Parse args: first token is the agent name
 		agent := args[0]
