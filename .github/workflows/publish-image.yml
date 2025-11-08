@@ -75,12 +75,16 @@ jobs:
         run: |
           set -euo pipefail
           LOG_PATH=build-amd64.log
-          : > "${LOG_PATH}"
-          docker build \
-            -f internal/assets/Dockerfile \
-            -t samsaffron/discourse-dv:${DATE_TAG}-amd64 \
-            . 2>&1 | tee -a "${LOG_PATH}"
-          docker push samsaffron/discourse-dv:${DATE_TAG}-amd64 2>&1 | tee -a "${LOG_PATH}"
+          {
+            echo "## $(date -u) — docker build amd64"
+            docker build \
+              -f internal/assets/Dockerfile \
+              -t samsaffron/discourse-dv:${DATE_TAG}-amd64 \
+              .
+            echo "## $(date -u) — docker push amd64"
+            docker push samsaffron/discourse-dv:${DATE_TAG}-amd64
+            echo "## $(date -u) — done"
+          } > "${LOG_PATH}" 2>&1
 
       - name: Upload build log
         if: always()
@@ -150,12 +154,16 @@ jobs:
         run: |
           set -euo pipefail
           LOG_PATH=build-arm64.log
-          : > "${LOG_PATH}"
-          docker build \
-            -f internal/assets/Dockerfile \
-            -t samsaffron/discourse-dv:${DATE_TAG}-arm64 \
-            . 2>&1 | tee -a "${LOG_PATH}"
-          docker push samsaffron/discourse-dv:${DATE_TAG}-arm64 2>&1 | tee -a "${LOG_PATH}"
+          {
+            echo "## $(date -u) — docker build arm64"
+            docker build \
+              -f internal/assets/Dockerfile \
+              -t samsaffron/discourse-dv:${DATE_TAG}-arm64 \
+              .
+            echo "## $(date -u) — docker push arm64"
+            docker push samsaffron/discourse-dv:${DATE_TAG}-arm64
+            echo "## $(date -u) — done"
+          } > "${LOG_PATH}" 2>&1
 
       - name: Upload build log
         if: always()
