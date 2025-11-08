@@ -67,14 +67,18 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build dv CLI
-        run: go build -o dv ./cmd/dv
 
       - name: Compute tags
         run: echo "DATE_TAG=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
-      - name: Build image
-        run: ./dv build --tag samsaffron/discourse-dv:latest > build.log 2>&1
+      - name: Build and push multi-arch image
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            -t samsaffron/discourse-dv:latest \
+            -t samsaffron/discourse-dv:${DATE_TAG} \
+            . > build.log 2>&1
 
       - name: Upload build log
         if: always()
@@ -84,10 +88,3 @@ jobs:
           path: build.log
           retention-days: 7
 
-      - name: Tag image
-        run: docker tag samsaffron/discourse-dv:latest samsaffron/discourse-dv:$DATE_TAG
-
-      - name: Push image
-        run: |
-          docker push samsaffron/discourse-dv:latest
-          docker push samsaffron/discourse-dv:$DATE_TAG
