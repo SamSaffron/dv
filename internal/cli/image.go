@@ -136,24 +136,16 @@ var imageAddCmd = &cobra.Command{
 		var kind string
 		switch {
 		case stock != "":
-			if stock != "discourse" && stock != "theme" {
-				return fmt.Errorf("--stock must be 'discourse' or 'theme'")
+			if stock != "discourse" {
+				return fmt.Errorf("--stock must be 'discourse'")
 			}
 			src = config.ImageSource{Source: "stock", StockName: stock}
 			kind = stock
 			if tag == "" {
-				if stock == "discourse" {
-					tag = cfg.ImageTag
-				} else {
-					tag = cfg.ThemeImageTag
-				}
+				tag = cfg.ImageTag
 			}
 			if workdir == "" {
-				if stock == "discourse" {
-					workdir = cfg.Workdir
-				} else {
-					workdir = cfg.ThemeWorkdir
-				}
+				workdir = cfg.Workdir
 			}
 			if port == 0 {
 				port = cfg.ContainerPort
@@ -301,8 +293,8 @@ var imageSetCmd = &cobra.Command{
 			img.ContainerPort = v
 		}
 		if v, _ := cmd.Flags().GetString("stock"); v != "" {
-			if v != "discourse" && v != "theme" {
-				return fmt.Errorf("--stock must be discourse or theme")
+			if v != "discourse" {
+				return fmt.Errorf("--stock must be discourse")
 			}
 			img.Dockerfile = config.ImageSource{Source: "stock", StockName: v}
 			if img.Kind == "custom" {
@@ -318,7 +310,7 @@ var imageSetCmd = &cobra.Command{
 				return fmt.Errorf("--dockerfile must point to a file")
 			}
 			img.Dockerfile = config.ImageSource{Source: "path", Path: abs}
-			if img.Kind != "theme" && img.Kind != "discourse" {
+			if img.Kind != "discourse" {
 				img.Kind = "custom"
 			}
 		}
@@ -341,7 +333,7 @@ func init() {
 	imageCmd.AddCommand(imageRenameCmd)
 	imageCmd.AddCommand(imageSetCmd)
 
-	imageAddCmd.Flags().String("stock", "", "Add a stock image: discourse|theme")
+	imageAddCmd.Flags().String("stock", "", "Add a stock image: discourse")
 	imageAddCmd.Flags().String("dockerfile", "", "Path to a Dockerfile for a custom image")
 	imageAddCmd.Flags().String("tag", "", "Docker image tag")
 	imageAddCmd.Flags().String("workdir", "", "Working directory inside the container")
@@ -350,6 +342,6 @@ func init() {
 	imageSetCmd.Flags().String("tag", "", "Docker image tag")
 	imageSetCmd.Flags().String("workdir", "", "Working directory inside the container")
 	imageSetCmd.Flags().Int("container-port", 0, "Container port to expose")
-	imageSetCmd.Flags().String("stock", "", "Switch dockerfile source to a stock image: discourse|theme")
+	imageSetCmd.Flags().String("stock", "", "Switch dockerfile source to the stock Discourse image")
 	imageSetCmd.Flags().String("dockerfile", "", "Switch dockerfile source to a custom Dockerfile path")
 }

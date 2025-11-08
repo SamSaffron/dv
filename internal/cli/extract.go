@@ -62,7 +62,6 @@ var extractCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		isTheme := imgCfg.Kind == "theme"
 		work := imgCfg.Workdir
 		// Check for changes
 		status, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git status --porcelain"})
@@ -90,32 +89,8 @@ var extractCmd = &cobra.Command{
 		}
 
 		// Ensure local clone
-		var localRepo string
-		var repoCloneUrl string
-
-		if isTheme {
-			// For themes, use the theme name for the local repo
-			themeName, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "basename $(pwd)"})
-			if err != nil {
-				return err
-			}
-			themeName = strings.TrimSpace(themeName)
-
-			// Create themes directory if it doesn't exist
-			themesDir := filepath.Join(dataDir, "themes")
-			if err := os.MkdirAll(themesDir, 0o755); err != nil {
-				return err
-			}
-			localRepo = filepath.Join(themesDir, themeName)
-
-			// Get the remote URL from the theme repo
-			repoCloneUrl, err = docker.ExecOutput(name, work, []string{"bash", "-lc", "git config --get remote.origin.url"})
-			repoCloneUrl = strings.TrimSpace(repoCloneUrl)
-		} else {
-			// For app development, use the discourse_src directory
-			localRepo = filepath.Join(dataDir, "discourse_src")
-			repoCloneUrl = cfg.DiscourseRepo
-		}
+		localRepo := filepath.Join(dataDir, "discourse_src")
+		repoCloneUrl := cfg.DiscourseRepo
 		if _, err := os.Stat(localRepo); os.IsNotExist(err) {
 			// Prefer SSH when possible; fall back to HTTPS
 			candidates := makeCloneCandidates(repoCloneUrl)

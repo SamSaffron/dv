@@ -2,13 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"dv/internal/assets"
 	"dv/internal/config"
 	"dv/internal/docker"
 	"dv/internal/xdg"
@@ -62,7 +60,6 @@ var startCmd = &cobra.Command{
 		}
 		imageTag := imgCfg.Tag
 		workdir := imgCfg.Workdir
-		isTheme := imgCfg.Kind == "theme"
 
 		if reset && docker.Exists(name) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Stopping and removing existing container '%s'...\n", name)
@@ -92,26 +89,6 @@ var startCmd = &cobra.Command{
 				return err
 			}
 
-			// For theme images, copy the theme-specific CLAUDE.md file
-			if isTheme {
-				tmpfile, err := os.CreateTemp("", "claude-theme-*.md")
-				if err != nil {
-					return err
-				}
-				defer os.Remove(tmpfile.Name())
-
-				if _, err := tmpfile.Write(assets.GetEmbeddedClaudeMdTheme()); err != nil {
-					tmpfile.Close()
-					return err
-				}
-				if err := tmpfile.Close(); err != nil {
-					return err
-				}
-
-				if err := docker.CopyToContainer(name, tmpfile.Name(), "/var/www/CLAUDE.md"); err != nil {
-					return fmt.Errorf("failed to copy theme documentation to container: %w", err)
-				}
-			}
 			// give it a moment to boot services
 			time.Sleep(500 * time.Millisecond)
 		} else if !docker.Running(name) {

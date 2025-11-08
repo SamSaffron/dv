@@ -40,15 +40,15 @@ var pullCmd = &cobra.Command{
 
 		// Determine which tag/ref to pull.
 		// If --tag is specified, trust it as the ref (full name or tag).
-		// Otherwise, for discourse/theme use the official published image
+		// Otherwise, for the stock discourse image use the official published image
 		// "samsaffron/discourse-dv:latest" and retag locally to the
 		// configured name so dv start/enter continue to work without
 		// additional configuration.
 		ref := img.Tag
 		if overrideTag != "" {
 			ref = overrideTag
-		} else if (img.Kind == "discourse" || img.Kind == "theme") && img.Tag == "ai_agent" {
-			// For the stock discourse/theme images with default tag, use the
+		} else if img.Kind == "discourse" && img.Tag == "ai_agent" {
+			// For the stock discourse image with default tag, use the
 			// official prebuilt image, and then retag it locally so dv continues
 			// to use the configured tag.
 			ref = "samsaffron/discourse-dv:latest"
@@ -73,7 +73,7 @@ var pullCmd = &cobra.Command{
 		// If we pulled the official image for the default stock config, retag
 		// it to the configured tag so existing workflows (dv start, etc.) work
 		// without requiring users to change their config.
-		if (img.Kind == "discourse" || img.Kind == "theme") && img.Tag != "" && ref == "samsaffron/discourse-dv:latest" && img.Tag != ref {
+		if img.Kind == "discourse" && img.Tag != "" && ref == "samsaffron/discourse-dv:latest" && img.Tag != ref {
 			fmt.Fprintf(cmd.OutOrStdout(), "Tagging %s as %s\n", ref, img.Tag)
 			if err := docker.TagImage(ref, img.Tag); err != nil {
 				return err

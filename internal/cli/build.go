@@ -30,14 +30,14 @@ var buildCmd = &cobra.Command{
 			return nil, cobra.ShellCompDirectiveDefault
 		}
 
-		// Start with the two shipped stock images, then append any configured ones
-		suggestions := []string{"discourse", "theme"}
+		// Start with the shipped stock image, then append any configured ones
+		suggestions := []string{"discourse"}
 
 		// Try to load configured images; ignore errors for completion purposes
 		if configDir, err := xdg.ConfigDir(); err == nil {
 			if cfg, err := config.LoadOrCreate(configDir); err == nil {
 				for name := range cfg.Images {
-					if name != "discourse" && name != "theme" {
+					if name != "discourse" {
 						suggestions = append(suggestions, name)
 					}
 				}
@@ -112,11 +112,9 @@ var buildCmd = &cobra.Command{
 			imgName := target
 			img, ok := cfg.Images[imgName]
 			if !ok {
-				// Allow stock keywords without pre-adding
+				// Allow stock keyword without pre-adding
 				if imgName == "discourse" {
 					img = config.ImageConfig{Kind: "discourse", Tag: cfg.ImageTag, Workdir: cfg.Workdir, ContainerPort: cfg.ContainerPort, Dockerfile: config.ImageSource{Source: "stock", StockName: "discourse"}}
-				} else if imgName == "theme" {
-					img = config.ImageConfig{Kind: "theme", Tag: cfg.ThemeImageTag, Workdir: cfg.ThemeWorkdir, ContainerPort: cfg.ContainerPort, Dockerfile: config.ImageSource{Source: "stock", StockName: "theme"}}
 				} else {
 					return fmt.Errorf("unknown image '%s'", imgName)
 				}
@@ -131,27 +129,14 @@ var buildCmd = &cobra.Command{
 			var err2 error
 			switch img.Dockerfile.Source {
 			case "stock":
-				switch img.Dockerfile.StockName {
-				case "theme":
-					dockerfilePath, contextDir, overridden, err2 = assets.ResolveDockerfileTheme(configDir)
-					if err2 != nil {
-						return err2
-					}
-					if overridden {
-						fmt.Fprintf(cmd.OutOrStdout(), "Using override Dockerfile: %s\n", dockerfilePath)
-					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "Using embedded theme Dockerfile (sha=%s) at: %s\n", assets.EmbeddedDockerfileThemeSHA256()[:12], dockerfilePath)
-					}
-				default:
-					dockerfilePath, contextDir, overridden, err2 = assets.ResolveDockerfile(configDir)
-					if err2 != nil {
-						return err2
-					}
-					if overridden {
-						fmt.Fprintf(cmd.OutOrStdout(), "Using override Dockerfile: %s\n", dockerfilePath)
-					} else {
-						fmt.Fprintf(cmd.OutOrStdout(), "Using embedded Dockerfile (sha=%s) at: %s\n", assets.EmbeddedDockerfileSHA256()[:12], dockerfilePath)
-					}
+				dockerfilePath, contextDir, overridden, err2 = assets.ResolveDockerfile(configDir)
+				if err2 != nil {
+					return err2
+				}
+				if overridden {
+					fmt.Fprintf(cmd.OutOrStdout(), "Using override Dockerfile: %s\n", dockerfilePath)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "Using embedded Dockerfile (sha=%s) at: %s\n", assets.EmbeddedDockerfileSHA256()[:12], dockerfilePath)
 				}
 			case "path":
 				dockerfilePath = img.Dockerfile.Path

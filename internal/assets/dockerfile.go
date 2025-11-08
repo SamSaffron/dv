@@ -21,27 +21,10 @@ var embeddedDockerfile []byte
 //go:embed Dockerfile.update.discourse
 var embeddedDockerfileUpdateDiscourse []byte
 
-//go:embed Dockerfile.theme
-var embeddedDockerfileTheme []byte
-
-//go:embed CLAUDE.md.theme
-var embeddedClaudeMdTheme []byte
-
 // EmbeddedDockerfileSHA256 returns the hex-encoded SHA-256 of the embedded Dockerfile.
 func EmbeddedDockerfileSHA256() string {
 	sum := sha256.Sum256(embeddedDockerfile)
 	return hex.EncodeToString(sum[:])
-}
-
-// EmbeddedDockerfileThemeSHA256 returns the hex-encoded SHA-256 of the embedded theme Dockerfile.
-func EmbeddedDockerfileThemeSHA256() string {
-	sum := sha256.Sum256(embeddedDockerfileTheme)
-	return hex.EncodeToString(sum[:])
-}
-
-// GetEmbeddedClaudeMdTheme returns the contents of the embedded CLAUDE.md.theme file.
-func GetEmbeddedClaudeMdTheme() []byte {
-	return embeddedClaudeMdTheme
 }
 
 // ResolveDockerfile determines which Dockerfile to use and ensures it exists.
@@ -52,16 +35,6 @@ func GetEmbeddedClaudeMdTheme() []byte {
 // It returns (dockerfilePath, contextDir, usedOverride, error)
 func ResolveDockerfile(configDir string) (string, string, bool, error) {
 	return resolveDockerfileInternal(configDir, "Dockerfile", embeddedDockerfile, EmbeddedDockerfileSHA256())
-}
-
-// ResolveDockerfileTheme determines which theme Dockerfile to use and ensures it exists.
-// Priority:
-// 1) Environment variable DV_DOCKERFILE_THEME points to an existing file
-// 2) A user-provided override at <configDir>/Dockerfile.theme.local
-// 3) The embedded Dockerfile.theme, extracted to <configDir>/Dockerfile.theme if missing or outdated
-// It returns (dockerfilePath, contextDir, usedOverride, error)
-func ResolveDockerfileTheme(configDir string) (string, string, bool, error) {
-	return resolveDockerfileInternal(configDir, "Dockerfile.theme", embeddedDockerfileTheme, EmbeddedDockerfileThemeSHA256())
 }
 
 // EmbeddedDockerfileUpdateDiscourseSHA256 returns the hex-encoded SHA-256 of the embedded update Dockerfile.
@@ -83,8 +56,8 @@ func ResolveDockerfileUpdateDiscourse(configDir string) (string, string, bool, e
 func resolveDockerfileInternal(configDir string, fileName string, embeddedContent []byte, embeddedSHA string) (string, string, bool, error) {
 	// Env override takes precedence
 	envVar := "DV_DOCKERFILE"
-	if fileName == "Dockerfile.theme" {
-		envVar = "DV_DOCKERFILE_THEME"
+	if fileName == "Dockerfile.update.discourse" {
+		envVar = "DV_DOCKERFILE_UPDATE_DISCOURSE"
 	}
 	if envPath, ok := os.LookupEnv(envVar); ok && envPath != "" {
 		if info, err := os.Stat(envPath); err == nil && !info.IsDir() {

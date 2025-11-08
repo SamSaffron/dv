@@ -21,12 +21,6 @@ type Config struct {
 	EnvPassthrough      []string `json:"envPassthrough"`
 	DiscourseRepo       string   `json:"discourseRepo"`
 	ExtractBranchPrefix string   `json:"extractBranchPrefix"`
-	// ThemeImageTag is the Docker image tag for theme development
-	ThemeImageTag string `json:"themeImageTag"`
-	// ThemeWorkdir is the working directory for theme development in the container
-	ThemeWorkdir string `json:"themeWorkdir"`
-	// ContainerType tracks whether a container is for app or theme development
-	ContainerTypes map[string]string `json:"containerTypes"`
 
 	// New image model (supersedes legacy fields above)
 	// SelectedImage is the name of the currently selected image (must always be set)
@@ -47,7 +41,7 @@ type Config struct {
 type ImageSource struct {
 	// Source is one of: "stock" | "path"
 	Source string `json:"source"`
-	// StockName is valid when Source=="stock": "discourse" | "theme"
+	// StockName is valid when Source=="stock": "discourse"
 	StockName string `json:"stockName,omitempty"`
 	// Path is valid when Source=="path": absolute or relative path to Dockerfile
 	Path string `json:"path,omitempty"`
@@ -55,7 +49,7 @@ type ImageSource struct {
 
 // ImageConfig is the per-image configuration.
 type ImageConfig struct {
-	// Kind drives special behavior in the CLI: "discourse" | "theme" | "custom"
+	// Kind drives special behavior in the CLI: "discourse" | "custom"
 	Kind          string      `json:"kind"`
 	Tag           string      `json:"tag"`
 	Workdir       string      `json:"workdir"`
@@ -78,9 +72,6 @@ func Default() Config {
 		},
 		DiscourseRepo:       "https://github.com/discourse/discourse.git",
 		ExtractBranchPrefix: "agent-changes",
-		ThemeImageTag:       "ai_agent_theme",
-		ThemeWorkdir:        "/var/www/themes/current",
-		ContainerTypes:      map[string]string{},
 		// New image model defaults
 		SelectedImage: "discourse",
 		Images: map[string]ImageConfig{
@@ -90,13 +81,6 @@ func Default() Config {
 				Workdir:       "/var/www/discourse",
 				ContainerPort: 4200,
 				Dockerfile:    ImageSource{Source: "stock", StockName: "discourse"},
-			},
-			"theme": {
-				Kind:          "theme",
-				Tag:           "ai_agent_theme",
-				Workdir:       "/var/www/themes/current",
-				ContainerPort: 4200,
-				Dockerfile:    ImageSource{Source: "stock", StockName: "theme"},
 			},
 		},
 		ContainerImages: map[string]string{},
@@ -129,7 +113,7 @@ func LoadOrCreate(configDir string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid config: %w", err)
 	}
 	// Migration to new image model if needed
-	// Ensure Images map is initialized and contains at least discourse and theme
+	// Ensure Images map is initialized and contains at least discourse
 	if cfg.Images == nil || len(cfg.Images) == 0 {
 		cfg.Images = map[string]ImageConfig{}
 		// Seed from legacy fields
@@ -140,15 +124,7 @@ func LoadOrCreate(configDir string) (Config, error) {
 			ContainerPort: valueOrDefault(cfg.ContainerPort, 4200),
 			Dockerfile:    ImageSource{Source: "stock", StockName: "discourse"},
 		}
-		theme := ImageConfig{
-			Kind:          "theme",
-			Tag:           defaultIfEmpty(cfg.ThemeImageTag, "ai_agent_theme"),
-			Workdir:       defaultIfEmpty(cfg.ThemeWorkdir, "/var/www/themes/current"),
-			ContainerPort: valueOrDefault(cfg.ContainerPort, 4200),
-			Dockerfile:    ImageSource{Source: "stock", StockName: "theme"},
-		}
 		cfg.Images["discourse"] = discourse
-		cfg.Images["theme"] = theme
 	}
 	if cfg.SelectedImage == "" {
 		cfg.SelectedImage = "discourse"
