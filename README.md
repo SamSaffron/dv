@@ -67,11 +67,11 @@ With `dv` installed (either via the script or `go build`), run the CLI directly 
    ```bash
    dv start
    ```
-3. Enter the container (interactive shell or run a command):
+3. Enter the container, or run a one-off command without opening a shell:
    ```bash
    dv enter
-   # or to run a one-off command
-   dv enter -- bin/rails c
+   # run a single command
+   dv run -- bin/rails c
    ```
 4. Extract changes from the container (when ready to create a PR):
    ```bash
@@ -119,14 +119,25 @@ Notes:
 - Performs a pre-flight check and picks the next free port if needed.
 
 ### dv enter
-Attach to the running container as user `discourse` in `/var/www/discourse`, or run a one-off command.
+Attach to the running container as user `discourse` in `/var/www/discourse` and open an interactive shell.
 
 ```bash
-dv enter [--name NAME] [-- cmd ...]
+dv enter [--name NAME]
 ```
 
 Notes:
 - Copies any configured host files into the container before launching the shell (see `copyFiles` under config).
+
+### dv run
+Run a non-interactive command inside the running container (defaults to the `discourse` user).
+
+```bash
+dv run [--name NAME] [--root] -- CMD [ARGS...]
+```
+
+Notes:
+- Same file-copy behavior as `dv enter`; run `dv run -- <command>` to execute without opening a shell.
+- Pass `--root` to execute as `root` inside the container.
 
 ### dv run-agent (alias: ra)
 Run an AI agent inside the container with a prompt.
@@ -302,8 +313,8 @@ dv config set KEY VALUE
 dv config show
 ```
 
-#### Copying host files on enter
-Configure files to copy from the host into the container every time you run `dv enter` by setting `copyFiles` in your config. Keys are host paths (supporting `~` and env vars), values are absolute container paths. A sensible default is provided for Codex auth:
+#### Copying host files before enter/run
+Configure files to copy from the host into the container every time you run `dv enter` or `dv run` by setting `copyFiles` in your config. Keys are host paths (supporting `~` and env vars), values are absolute container paths. A sensible default is provided for Codex auth:
 
 ```json
 {

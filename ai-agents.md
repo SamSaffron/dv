@@ -1,4 +1,5 @@
 # AI Agents Guide
+<!-- Reminder: keep this document updated whenever CLI behavior changes. -->
 
 This guide documents the repository purpose, key files, and operational guidelines for autonomous agents. The primary interface is the `dv` Go CLI.
 
@@ -16,7 +17,8 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `internal/cli/`: Subcommand implementations
   - `build.go`: `dv build` builds Docker image
   - `start.go`: `dv start` creates or starts containers (no shell)
-  - `enter.go`: `dv enter` opens a shell or runs commands inside the container
+  - `enter.go`: `dv enter` opens an interactive shell inside the container
+  - `run.go`: `dv run` executes commands inside the container without opening a shell
   - `stop.go`: `dv stop` stops containers
 - `remove.go`: `dv remove` removes containers/images
   - `agent.go`: implements top-level `list`, `new`, `select`, `rename` agent commands
@@ -40,13 +42,57 @@ This guide documents the repository purpose, key files, and operational guidelin
 - Use `dv` instead of `bin/*` scripts
 - Verify image exists (`dv build`) and container is started (`dv start`) before work
 - Run container commands with:
-  - `dv enter -- <command>` (non-interactive)
+  - `dv run -- <command>` (non-interactive)
   - `dv enter` (interactive shell)
+- Launch preconfigured CLIs inside the container with `dv run-agent` / `dv ra`
 - Manage containers via `dv new|select|list|rename`
 - Export changes with `dv extract`, then commit in `${XDG_DATA_HOME}/dv/discourse_src`
 - Use `dv extract --sync` (optionally `--debug`) to keep the host and container code trees synchronized in real time; press `Ctrl+C` to stop sync mode
 - Ensure the container has `inotifywait` available (install the `inotify-tools` package or equivalent) before starting sync mode
 - If host port conflicts, use `--host-port` or stop conflicting service
+
+## Command Reference
+
+### Container & Image Lifecycle
+- `dv build` — Build the selected image using the embedded Dockerfile (honors overrides/env flags).
+- `dv pull [NAME]` — Pull a published image/tag (optionally retag) instead of building locally.
+- `dv image list|show|select|add|set|rename|remove` — Manage image definitions, workdirs, ports, and Dockerfile sources.
+- `dv start [--reset]` — Create/start the selected container (auto-picks host ports).
+- `dv stop`, `dv restart`, `dv restart discourse` — Stop containers, restart them fully, or restart just runit services.
+- `dv remove [NAME] [--image]` — Delete containers (optionally the backing image too).
+- `dv expose [--port]` — Proxy the container onto every LAN interface for device testing; Ctrl+C to stop.
+- `dv tui` — TUI for selecting agents, running commands, and inspecting status.
+
+### Agent Containers (per-image instances)
+- `dv list` — Show containers tied to the selected image (marks the active one).
+- `dv new [NAME]` — Create a new container and select it.
+- `dv select NAME` — Switch the active container.
+- `dv rename OLD NEW` — Rename a container (updates config metadata).
+- `dv data` — Print `${XDG_DATA_HOME}/dv` so scripts can locate extracts.
+
+### Working Inside the Container
+- `dv run -- <command>` — Non-interactive execution (supports `--root`).
+- `dv enter` — Interactive login shell (copyFiles synced beforehand).
+- `dv run-agent/ra` — Run supported AI tooling with prompt/arg passthrough.
+
+### Code Sync & Git Integration
+- `dv extract [--sync|--debug|--chdir|--echo-cd]` — Copy the container workspace into `${XDG_DATA_HOME}/dv/discourse_src`, optionally keep it bidirectionally synced or emit a `cd` command.
+- `dv extract plugin <name>` — Mirror a plugin repo beneath `${XDG_DATA_HOME}/dv/<plugin>_src`, respecting Git remotes.
+- `dv import [--base main]` — Push local commits/uncommitted work from the host repo into the running container.
+- `dv branch BRANCH`, `dv pr NUMBER` — Checkout upstream branches or GitHub PRs inside the container and rerun migrations/seed steps.
+
+### Configuration, Metadata & Tooling
+- `dv config show|get|set KEY VALUE` — Manage JSON config (`selectedAgent`, env passthrough, copyFiles, etc.).
+- `dv config completion <shell>` — Install shell completions.
+- `dv config ccr` — Bootstrap Claude Code Router presets via OpenRouter/OpenAI rankings.
+- `dv config mcp NAME` — Configure Playwright/Discourse MCP servers inside the container (writes TOML, sets envs).
+
+### Updates & Diagnostics
+- `dv update agents` — Refresh bundled AI tools inside the running container.
+- `dv update discourse [--image NAME]` — Rebuild the Discourse base image using the embedded updater Dockerfile.
+- `dv version` — Print the running CLI version (and update warnings).
+- `dv upgrade [--version vX.Y.Z]` — Download and replace the current binary in-place.
+- `dv update-check` — Hidden command invoked automatically to populate `${XDG_CONFIG_HOME}/dv/update-state.json`.
 
 ### Go code hygiene
 - After editing any Go files, **format code and order imports**:

@@ -277,7 +277,7 @@ var importCmd = &cobra.Command{
 				cName := strings.TrimSpace(cNameOut)
 				cEmail := strings.TrimSpace(cEmailOut)
 				return fmt.Errorf(
-					"container: failed to apply patches (git am): %v\n%s\n\ncontainer git identity: user.name=%q, user.email=%q\nIf the error mentions 'Author identity unknown', set identity with:\n  dv enter -- git config user.email 'you@example.com' && git config user.name 'Your Name'",
+					"container: failed to apply patches (git am): %v\n%s\n\ncontainer git identity: user.name=%q, user.email=%q\nIf the error mentions 'Author identity unknown', set identity with:\n  dv run -- git config user.email 'you@example.com' && git config user.name 'Your Name'",
 					err,
 					strings.TrimSpace(out),
 					cName,
