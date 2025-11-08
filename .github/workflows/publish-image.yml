@@ -46,7 +46,7 @@ jobs:
         run: echo "DATE_TAG=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
 
       - name: Build image
-        run: ./dv build --tag samsaffron/discourse-dv:latest > build.log
+        run: ./dv build --tag samsaffron/discourse-dv:latest > build.log 2>&1
 
       - name: Upload build log
         if: always()
