@@ -18,7 +18,6 @@ type BuildOptions struct {
 	ExtraArgs    []string // additional docker build args supplied by callers
 	ForceClassic bool     // skip buildx/BuildKit helpers and use legacy docker build
 	Builder      string   // optional buildx builder name
-	CacheDir     string   // optional local cache directory for buildx cache import/export
 }
 
 func Exists(name string) bool {
@@ -82,13 +81,6 @@ func BuildFrom(tag, dockerfilePath, contextDir string, opts BuildOptions) error 
 			opts.Builder = env
 		}
 	}
-	if opts.CacheDir == "" {
-		opts.CacheDir = strings.TrimSpace(os.Getenv("DV_BUILDX_CACHE"))
-	}
-	if isTruthyEnv("DV_DISABLE_BUILD_CACHE") {
-		opts.CacheDir = ""
-	}
-
 	useClassic := opts.ForceClassic || isTruthyEnv("DV_DISABLE_BUILDX")
 	buildxOK := buildxAvailable()
 	if !useClassic && buildxOK {
@@ -118,14 +110,6 @@ func runBuildx(tag, dockerfilePath, contextDir string, opts BuildOptions) error 
 	argv := []string{"buildx", "build", "--load", "-t", tag, "-f", dockerfilePath}
 	if builder := strings.TrimSpace(opts.Builder); builder != "" {
 		argv = append(argv, "--builder", builder)
-	}
-	if cacheDir := strings.TrimSpace(opts.CacheDir); cacheDir != "" {
-		if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: unable to prepare cache dir %s: %v\n", cacheDir, err)
-		} else {
-			argv = append(argv, "--cache-from", fmt.Sprintf("type=local,src=%s", cacheDir))
-			argv = append(argv, "--cache-to", fmt.Sprintf("type=local,dest=%s,mode=max"))
-		}
 	}
 	argv = append(argv, opts.ExtraArgs...)
 	argv = append(argv, contextDir)

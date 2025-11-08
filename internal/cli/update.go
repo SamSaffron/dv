@@ -143,15 +143,8 @@ var updateDiscourseCmd = &cobra.Command{
 
 		// Build with BASE_IMAGE arg pointing at existing image tag
 		buildArgs := []string{"--build-arg", "BASE_IMAGE=" + baseTag}
-		cacheDir := ""
-		if dir, err := defaultBuildCacheDir(baseTag); err == nil {
-			cacheDir = dir
-		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "Warning: unable to determine cache directory: %v\n", err)
-		}
 		opts := docker.BuildOptions{
 			ExtraArgs: buildArgs,
-			CacheDir:  cacheDir,
 		}
 		if err := docker.BuildFrom(tempTag, dockerfilePath, contextDir, opts); err != nil {
 			return err

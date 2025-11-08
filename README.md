@@ -104,8 +104,8 @@ Notes:
   2) `${XDG_CONFIG_HOME}/dv/Dockerfile.local`
   3) Embedded default (materialized to `${XDG_CONFIG_HOME}/dv/Dockerfile`)
   The command prints which Dockerfile path it used.
-- BuildKit/buildx is enabled by default (`docker buildx build --load`) and stores a persistent cache under `${XDG_DATA_HOME}/dv/buildkit-cache/<image-tag>` so iterative `dv build` runs are much faster. The CLI automatically falls back to legacy `docker build` if buildx is unavailable.
-- Opt-out controls: `--classic-build` forces legacy `docker build`, `--no-cache-share` skips the persistent cache, `--cache-dir PATH` pins the cache location, and `--builder NAME` targets a specific buildx builder (remote builders, Docker Build Cloud, etc.).
+- BuildKit/buildx is enabled by default (`docker buildx build --load`). The CLI automatically falls back to legacy `docker build` if buildx is unavailable.
+- Opt-out controls: `--classic-build` forces legacy `docker build`, and `--builder NAME` targets a specific buildx builder (remote builders, Docker Build Cloud, etc.).
 
 ### dv start
 Create or start the container for the selected image (no shell).
@@ -358,9 +358,7 @@ Automatically passed through when set on the host:
 Set these on the host to change how `dv build` (and other build helpers) behave:
 
 - `DV_DISABLE_BUILDX` — force legacy `docker build` even if buildx is available.
-- `DV_DISABLE_BUILD_CACHE` — skip the persistent BuildKit cache import/export without changing CLI flags.
 - `DV_BUILDX_BUILDER` (or `DV_BUILDER`) — default builder name used for `docker buildx build`, useful for remote builders.
-- `DV_BUILDX_CACHE` — override the cache directory used for BuildKit local cache exports.
 
 ## Container Details
 
