@@ -27,12 +27,22 @@ jobs:
         id: date
         run: echo "date_tag=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Light prune for space
-        run: |
+      - name: Aggressive cleanup
+        run: | 
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/julia*
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/share/chromium
+          sudo rm -rf /opt/microsoft /opt/google
+          sudo rm -rf /opt/az
+          sudo rm -rf /usr/local/share/powershell 
+          sudo rm -rf /opt/hostedtoolcache 
           docker system prune -af || true
-          docker builder prune -af || true
+          docker builder prune -af || true 
           df -h
-
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
