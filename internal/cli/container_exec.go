@@ -59,7 +59,7 @@ func prepareContainerExecContext(cmd *cobra.Command) (containerExecContext, bool
 			return containerExecContext{}, false, err
 		}
 	}
-	workdir := config.EffectiveWorkdir(cfg, imgCfg)
+	workdir := config.EffectiveWorkdir(cfg, imgCfg, name)
 
 	copyConfiguredFiles(cmd, cfg, name, workdir)
 

@@ -12,10 +12,11 @@ import (
 )
 
 type Config struct {
-	ImageTag         string `json:"imageTag"`
-	DefaultContainer string `json:"defaultContainerName"`
-	Workdir          string `json:"workdir"`
-	CustomWorkdir    string `json:"customWorkdir,omitempty"`
+	ImageTag         string            `json:"imageTag"`
+	DefaultContainer string            `json:"defaultContainerName"`
+	Workdir          string            `json:"workdir"`
+	CustomWorkdir    string            `json:"customWorkdir,omitempty"`
+	CustomWorkdirs   map[string]string `json:"customWorkdirs,omitempty"`
 	// HostStartingPort is the first port to try on the host.
 	HostStartingPort    int      `json:"hostStartingPort"`
 	ContainerPort       int      `json:"containerPort"`
@@ -64,6 +65,7 @@ func Default() Config {
 		ImageTag:         "ai_agent",
 		DefaultContainer: "ai_agent",
 		Workdir:          "/var/www/discourse",
+		CustomWorkdirs:   map[string]string{},
 		HostStartingPort: 4200,
 		ContainerPort:    4200,
 		EnvPassthrough: []string{
@@ -139,6 +141,20 @@ func LoadOrCreate(configDir string) (Config, error) {
 			"~/.codex/auth.json": "/home/discourse/.codex/auth.json",
 		}
 	}
+	if cfg.CustomWorkdirs == nil {
+		cfg.CustomWorkdirs = map[string]string{}
+	}
+	if w := strings.TrimSpace(cfg.CustomWorkdir); w != "" {
+		target := cfg.SelectedAgent
+		if target == "" {
+			target = cfg.DefaultContainer
+		}
+		if target == "" {
+			target = "default"
+		}
+		cfg.CustomWorkdirs[target] = w
+		cfg.CustomWorkdir = ""
+	}
 	return cfg, nil
 }
 
@@ -170,13 +186,17 @@ func valueOrDefault(value int, fallback int) int {
 
 // EffectiveWorkdir returns the runtime working directory dv commands should use.
 // Priority:
-//  1. Custom override set via `dv config workdir`
+//  1. Container-specific override set via `dv config workdir`
 //  2. Per-image workdir
-//  3. Legacy global workdir
+//  3. Legacy global workdir field
 //  4. Default /var/www/discourse
-func EffectiveWorkdir(cfg Config, img ImageConfig) string {
-	if w := strings.TrimSpace(cfg.CustomWorkdir); w != "" {
-		return path.Clean(w)
+func EffectiveWorkdir(cfg Config, img ImageConfig, containerName string) string {
+	if containerName != "" {
+		if cfg.CustomWorkdirs != nil {
+			if w := strings.TrimSpace(cfg.CustomWorkdirs[containerName]); w != "" {
+				return path.Clean(w)
+			}
+		}
 	}
 	if w := strings.TrimSpace(img.Workdir); w != "" {
 		return w

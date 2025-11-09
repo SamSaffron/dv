@@ -55,6 +55,12 @@ var renameCmd = &cobra.Command{
 				cfg.ContainerImages[newName] = img
 			}
 		}
+		if cfg.CustomWorkdirs != nil {
+			if w, ok := cfg.CustomWorkdirs[oldName]; ok {
+				delete(cfg.CustomWorkdirs, oldName)
+				cfg.CustomWorkdirs[newName] = w
+			}
+		}
 		if err := config.Save(configDir, cfg); err != nil {
 			return err
 		}

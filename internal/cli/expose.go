@@ -88,7 +88,8 @@ Press Ctrl+C to stop exposing.`,
 		}
 
 		// Display success message
-		fmt.Fprintln(cmd.OutOrStdout(), "✓ Container exposed on local network\n")
+		fmt.Fprintln(cmd.OutOrStdout(), "✓ Container exposed on local network")
+		fmt.Fprintln(cmd.OutOrStdout())
 		fmt.Fprintln(cmd.OutOrStdout(), "  From your device, visit:")
 		for _, ip := range ips {
 			ifaceName := getInterfaceName(ip)
@@ -98,7 +99,8 @@ Press Ctrl+C to stop exposing.`,
 			}
 			fmt.Fprintln(cmd.OutOrStdout())
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "\n  Press Ctrl+C to stop")
+		fmt.Fprintln(cmd.OutOrStdout())
+		fmt.Fprintln(cmd.OutOrStdout(), "  Press Ctrl+C to stop")
 
 		// Wait for interrupt signal
 		sigChan := make(chan os.Signal, 1)
@@ -106,7 +108,8 @@ Press Ctrl+C to stop exposing.`,
 
 		select {
 		case <-sigChan:
-			fmt.Fprintln(cmd.OutOrStdout(), "\n\nStopping...")
+			fmt.Fprintln(cmd.OutOrStdout())
+			fmt.Fprintln(cmd.OutOrStdout(), "Stopping...")
 			cancel()
 		case err := <-errChan:
 			cancel()

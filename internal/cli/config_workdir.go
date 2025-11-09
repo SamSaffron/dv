@@ -13,7 +13,7 @@ import (
 
 var configWorkdirCmd = &cobra.Command{
 	Use:   "workdir [PATH]",
-	Short: "Show or override the default container workdir used by dv run/enter/extract",
+	Short: "Show or override the per-container workdir used by dv run/enter/extract",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reset, _ := cmd.Flags().GetBool("reset")
@@ -30,33 +30,57 @@ var configWorkdirCmd = &cobra.Command{
 			return err
 		}
 
+		containerOverride, _ := cmd.Flags().GetString("container")
+		containerName := strings.TrimSpace(containerOverride)
+		if containerName == "" {
+			containerName = currentAgentName(cfg)
+		}
+		if strings.TrimSpace(containerName) == "" {
+			return fmt.Errorf("no container selected; use --container or run 'dv start'")
+		}
+
+		imgName := cfg.ContainerImages[containerName]
+		displayImage := imgName
+		if strings.TrimSpace(displayImage) == "" {
+			displayImage = cfg.SelectedImage
+		}
+		_, imgCfg, err := resolveImage(cfg, imgName)
+		if err != nil {
+			return err
+		}
+		imageWorkdir := strings.TrimSpace(imgCfg.Workdir)
+		if imageWorkdir == "" {
+			imageWorkdir = "/var/www/discourse"
+		}
+
 		if reset {
-			if strings.TrimSpace(cfg.CustomWorkdir) == "" {
-				fmt.Fprintln(cmd.OutOrStdout(), "Workdir override already cleared.")
+			removed := false
+			if cfg.CustomWorkdirs != nil {
+				if _, ok := cfg.CustomWorkdirs[containerName]; ok {
+					delete(cfg.CustomWorkdirs, containerName)
+					removed = true
+				}
+			}
+			if !removed {
+				fmt.Fprintf(cmd.OutOrStdout(), "No override set for container %s.\n", containerName)
 				return nil
 			}
-			cfg.CustomWorkdir = ""
 			if err := config.Save(configDir, cfg); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Workdir override cleared; runtime commands now use image defaults.")
+			fmt.Fprintf(cmd.OutOrStdout(), "Cleared workdir override for container %s; image defaults restored.\n", containerName)
 			return nil
 		}
 
 		if len(args) == 0 {
-			imgName, imgCfg, err := resolveImage(cfg, "")
-			if err != nil {
-				return err
+			override := ""
+			if cfg.CustomWorkdirs != nil {
+				override = strings.TrimSpace(cfg.CustomWorkdirs[containerName])
 			}
-			imageWorkdir := strings.TrimSpace(imgCfg.Workdir)
-			if imageWorkdir == "" {
-				imageWorkdir = "/var/www/discourse"
-			}
-			effective := config.EffectiveWorkdir(cfg, imgCfg)
-			override := strings.TrimSpace(cfg.CustomWorkdir)
+			effective := config.EffectiveWorkdir(cfg, imgCfg, containerName)
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Selected image: %s\n", imgName)
-			fmt.Fprintf(cmd.OutOrStdout(), "Image workdir: %s\n", imageWorkdir)
+			fmt.Fprintf(cmd.OutOrStdout(), "Container: %s\n", containerName)
+			fmt.Fprintf(cmd.OutOrStdout(), "Image: %s (workdir %s)\n", displayImage, imageWorkdir)
 			if override == "" {
 				fmt.Fprintln(cmd.OutOrStdout(), "Override: (not set)")
 			} else {
@@ -72,17 +96,21 @@ var configWorkdirCmd = &cobra.Command{
 		}
 		cleaned := path.Clean(newWorkdir)
 
-		cfg.CustomWorkdir = cleaned
+		if cfg.CustomWorkdirs == nil {
+			cfg.CustomWorkdirs = map[string]string{}
+		}
+		cfg.CustomWorkdirs[containerName] = cleaned
 		if err := config.Save(configDir, cfg); err != nil {
 			return err
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Workdir override set to %s\n", cleaned)
-		fmt.Fprintln(cmd.OutOrStdout(), "Future 'dv run', 'dv enter', 'dv run-agent', and 'dv extract' commands will use this path.")
+		fmt.Fprintf(cmd.OutOrStdout(), "Workdir override for %s set to %s\n", containerName, cleaned)
+		fmt.Fprintf(cmd.OutOrStdout(), "Future 'dv run', 'dv enter', 'dv run-agent', and 'dv extract' commands targeting %s will use this path.\n", containerName)
 		return nil
 	},
 }
 
 func init() {
 	configWorkdirCmd.Flags().Bool("reset", false, "Remove the override and fall back to the image workdir")
+	configWorkdirCmd.Flags().String("container", "", "Container to inspect or modify (defaults to the selected agent)")
 	configCmd.AddCommand(configWorkdirCmd)
 }

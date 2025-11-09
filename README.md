@@ -313,6 +313,9 @@ dv config set KEY VALUE
 dv config show
 ```
 
+#### Theme bootstrap
+Use `dv config theme [REPO]` to prepare a theme workspace inside the running container. Running it with no arguments prompts for a name **and** whether you’re building a full theme or component, installs the `discourse_theme` gem, scaffolds a minimal theme under `/home/discourse/<name>`, writes an `AGENTS.md` brief for AI tools, and updates the workdir override so `dv enter` drops you there. Supplying a git URL or `owner/repo` slug clones the existing theme instead of generating a skeleton, while still installing the gem, writing `AGENTS.md`, and configuring the watcher. Each workspace also receives a `theme-watch-<slug>` runit service that runs `discourse_theme watch` with an API key that’s automatically bound to the first admin user; restart it anytime with `sv restart theme-watch-<slug>` inside the container. Pass `--theme-name` (and optionally `--kind theme|component`) to skip the interactive prompts, and `--verbose` if you want to see every helper command that runs (handy when debugging API key or watcher issues).
+
 #### Copying host files before enter/run
 Configure files to copy from the host into the container every time you run `dv enter` or `dv run` by setting `copyFiles` in your config. Keys are host paths (supporting `~` and env vars), values are absolute container paths. A sensible default is provided for Codex auth:
 

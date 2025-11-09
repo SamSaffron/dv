@@ -125,7 +125,7 @@ var runAgentCmd = &cobra.Command{
 				return err
 			}
 		}
-		workdir := config.EffectiveWorkdir(cfg, imgCfg)
+		workdir := config.EffectiveWorkdir(cfg, imgCfg, name)
 
 		// Copy configured files (auth, etc.) into the container as in `enter`
 		copyConfiguredFiles(cmd, cfg, name, workdir)

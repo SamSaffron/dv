@@ -32,6 +32,7 @@ var removeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		dirty := false
 
 		removeImage, _ := cmd.Flags().GetBool("image")
 		name, _ := cmd.Flags().GetString("name")
@@ -41,6 +42,7 @@ var removeCmd = &cobra.Command{
 		if name == "" {
 			name = currentAgentName(cfg)
 		}
+		imgForContainer := cfg.ContainerImages[name]
 
 		if docker.Exists(name) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Stopping and removing container '%s'...\n", name)
@@ -59,10 +61,23 @@ var removeCmd = &cobra.Command{
 			}
 		}
 
+		if cfg.ContainerImages != nil {
+			if _, ok := cfg.ContainerImages[name]; ok {
+				delete(cfg.ContainerImages, name)
+				dirty = true
+			}
+		}
+		if cfg.CustomWorkdirs != nil {
+			if _, ok := cfg.CustomWorkdirs[name]; ok {
+				delete(cfg.CustomWorkdirs, name)
+				dirty = true
+			}
+		}
+
 		// If we removed the selected agent, choose the first remaining container for the selected image
 		if cfg.SelectedAgent == name {
 			// Determine image to filter by: prefer the container's recorded image, else the currently selected image
-			imgName := cfg.ContainerImages[name]
+			imgName := imgForContainer
 			_, imgCfg, err := resolveImage(cfg, imgName)
 			if err != nil {
 				// Fallback to selected image silently
@@ -87,11 +102,17 @@ var removeCmd = &cobra.Command{
 				break
 			}
 			cfg.SelectedAgent = first
-			_ = config.Save(configDir, cfg)
+			dirty = true
 			if first != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "Selected agent: %s\n", first)
 			} else {
 				fmt.Fprintln(cmd.OutOrStdout(), "Selected agent: (none)")
+			}
+		}
+
+		if dirty {
+			if err := config.Save(configDir, cfg); err != nil {
+				return err
 			}
 		}
 

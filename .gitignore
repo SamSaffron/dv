@@ -2,3 +2,4 @@
 dv
 .gocache/*
 .cursor/mcp.json
+.cache/*
