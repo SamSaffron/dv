@@ -2,65 +2,33 @@ name: Publish Image
 
 on:
   schedule:
-    - cron: '0 5 * * *'
+    - cron: '0 5 * * *'   # 05:00 UTC nightly
   workflow_dispatch:
 
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY_REPO: samsaffron/discourse-dv
+
 jobs:
-  determine-tag:
+  build-and-push:
     runs-on: ubuntu-latest
-    outputs:
-      date_tag: ${{ steps.date.outputs.date_tag }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
-      - name: Compute tag
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute date tag (UTC)
         id: date
         run: echo "date_tag=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
-  build-amd64:
-    needs: determine-tag
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      DATE_TAG: ${{ needs.determine-tag.outputs.date_tag }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Aggressive cleanup
+      - name: Light prune for space
         run: |
-          # Remove Java (JDKs)
-          sudo rm -rf /usr/lib/jvm
-
-          # Remove .NET SDKs
-          sudo rm -rf /usr/share/dotnet
-
-          # Remove Swift toolchain
-          sudo rm -rf /usr/share/swift
-
-          # Remove Haskell (GHC)
-          sudo rm -rf /usr/local/.ghcup
-
-          # Remove Julia
-          sudo rm -rf /usr/local/julia*
-
-          # Remove Android SDKs
-          sudo rm -rf /usr/local/lib/android
-
-          # Remove Chromium (optional if not using for browser tests)
-          sudo rm -rf /usr/local/share/chromium
-
-          # Remove Microsoft/Edge and Google Chrome builds
-          sudo rm -rf /opt/microsoft /opt/google
-
-          # Remove Azure CLI
-          sudo rm -rf /opt/az
-
-          # Remove PowerShell
-          sudo rm -rf /usr/local/share/powershell
-
-          # Remove CodeQL and other toolcaches
-          sudo rm -rf /opt/hostedtoolcache
-
           docker system prune -af || true
           docker builder prune -af || true
           df -h
@@ -71,135 +39,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push amd64 image
-        run: |
-          set -euo pipefail
-          LOG_PATH=build-amd64.log
-          {
-            echo "## $(date -u) — docker build amd64"
-            docker build \
-              -f internal/assets/Dockerfile \
-              -t samsaffron/discourse-dv:${DATE_TAG}-amd64 \
-              .
-            echo "## $(date -u) — docker push amd64"
-            docker push samsaffron/discourse-dv:${DATE_TAG}-amd64
-            echo "## $(date -u) — done"
-          } > "${LOG_PATH}" 2>&1
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
 
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-amd64
-          path: build-amd64.log
-          retention-days: 7
-
-  build-arm64:
-    needs: determine-tag
-    runs-on: ubuntu-latest-arm64
-    permissions:
-      contents: read
-    env:
-      DATE_TAG: ${{ needs.determine-tag.outputs.date_tag }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Aggressive cleanup
-        run: |
-          # Remove Java (JDKs)
-          sudo rm -rf /usr/lib/jvm
-
-          # Remove .NET SDKs
-          sudo rm -rf /usr/share/dotnet
-
-          # Remove Swift toolchain
-          sudo rm -rf /usr/share/swift
-
-          # Remove Haskell (GHC)
-          sudo rm -rf /usr/local/.ghcup
-
-          # Remove Julia
-          sudo rm -rf /usr/local/julia*
-
-          # Remove Android SDKs
-          sudo rm -rf /usr/local/lib/android
-
-          # Remove Chromium (optional if not using for browser tests)
-          sudo rm -rf /usr/local/share/chromium
-
-          # Remove Microsoft/Edge and Google Chrome builds
-          sudo rm -rf /opt/microsoft /opt/google
-
-          # Remove Azure CLI
-          sudo rm -rf /opt/az
-
-          # Remove PowerShell
-          sudo rm -rf /usr/local/share/powershell
-
-          # Remove CodeQL and other toolcaches
-          sudo rm -rf /opt/hostedtoolcache
-
-          docker system prune -af || true
-          docker builder prune -af || true
-          df -h
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push arm64 image
-        run: |
-          set -euo pipefail
-          LOG_PATH=build-arm64.log
-          {
-            echo "## $(date -u) — docker build arm64"
-            docker build \
-              -f internal/assets/Dockerfile \
-              -t samsaffron/discourse-dv:${DATE_TAG}-arm64 \
-              .
-            echo "## $(date -u) — docker push arm64"
-            docker push samsaffron/discourse-dv:${DATE_TAG}-arm64
-            echo "## $(date -u) — done"
-          } > "${LOG_PATH}" 2>&1
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-arm64
-          path: build-arm64.log
-          retention-days: 7
-
-  publish-manifest:
-    needs:
-      - determine-tag
-      - build-amd64
-      - build-arm64
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      DATE_TAG: ${{ needs.determine-tag.outputs.date_tag }}
-    steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
+      - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Publish multi-arch manifests
-        run: |
-          docker buildx imagetools create \
-            -t samsaffron/discourse-dv:latest \
-            -t samsaffron/discourse-dv:${DATE_TAG} \
-            samsaffron/discourse-dv:${DATE_TAG}-amd64 \
-            samsaffron/discourse-dv:${DATE_TAG}-arm64
+      - name: Build & push multi-arch (amd64+arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: internal/assets/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY_REPO }}:latest
+            ${{ env.REGISTRY_REPO }}:${{ steps.date.outputs.date_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Inspect published image
-        run: docker buildx imagetools inspect samsaffron/discourse-dv:${DATE_TAG}
+      - name: Inspect pushed image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_REPO }}:${{ steps.date.outputs.date_tag }}
+
