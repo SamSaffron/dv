@@ -16,8 +16,12 @@ This folder contains a {{if .IsComponent}}theme component{{else}}full theme{{end
 
 ## Workflow Reminders
 1. Edit files under the theme root; SCSS/JS/HTML assets live in `common/`, `desktop/`, and `mobile/`.
-2. Run Ruby or Ember specs from `{{.ContainerDiscoursePath}}` when changes affect Discourse core behavior.
-3. Create `settings.yml` in the theme root whenever you need custom settings; it isn’t pre-generated.
+2. Use Discourse’s theme conventions:
+   - Put shared SCSS in `common/common.scss`.
+   - Put desktop-only and mobile-only tweaks in `desktop/desktop.scss` and `mobile/mobile.scss`.
+   - Put theme JavaScript in `javascripts/discourse/api-initializers/*.gjs` using `apiInitializer` (not in `common/common.js`).
+3. Create `settings.yml` in the theme root whenever you need custom settings; Discourse will expose them as `settings.*` in theme JS and as SCSS vars.
+4. Treat this as a normal Discourse remote theme repo: keep changes minimal, composable, and aligned with core APIs.
 
 Stay focused on Discourse theme development—no knowledge of host tooling is required beyond the paths listed above.
 
@@ -25,11 +29,45 @@ Initialize version control with `git init .` in the theme root when you start a 
 
 ## Theme Testing
 - Store theme-focused suites under `test/{unit,integration,acceptance}` inside the theme so the assets and helpers stay bundled; the companion demo `test/unit/demo-theme-test.gjs` shows a minimal QUnit module you can copy.
-- `discourse_theme watch` (managed by `{{.ServiceName}}`) keeps this folder uploaded to the Discourse container, so the tests land under `{{.ContainerDiscoursePath}}/themes/<slug>/test/...` automatically.
-- Execute the suite from the Discourse repo with `cd {{.ContainerDiscoursePath}} && bundle exec rake "themes:qunit[name,{{.ThemeName}}]"`.
-- Lint anything you add via `cd {{.ContainerDiscoursePath}} && bin/lint themes/<slug>/test/unit/demo-theme-test.gjs` (or point it at the specific files you edited).
+- `discourse_theme watch` (managed by `theme-watch-christmas-theme`) keeps this folder uploaded to the Discourse container, so the tests land under `/var/www/discourse/themes/<slug>/test/...` automatically.
+- Execute the suite from the Discourse repo with:
+  - `cd /var/www/discourse && bundle exec rake "themes:qunit[name,Christmas Theme]"`.
+- Lint anything you add via:
+  - `cd /var/www/discourse && bin/lint themes/<slug>/test/unit/demo-theme-test.gjs` (or specific files).
 
-## Finding core CSS vars quickly
-- Look under `{{.ContainerDiscoursePath}}/app/assets/stylesheets/common/foundation/` for the `colors.scss`/`color_transformations.scss` pair; they list the source `$primary`/`$secondary` variables and their helpers that map to the CSS variables in `color_definitions.scss`.
-- When you need a specific `--var`, search the Discourse repo (e.g., `rg -n -g"color_definitions.scss" --glob "*.scss" color_definitions.scss` or `rg -n "--[a-zA-Z0-9_-]+" app/assets/stylesheets`) to see where it originates and how it’s consumed.
-- In themes, mirror those export points: override the same vars in `common/common.scss` (or desktop/mobile) so theme previews stay in sync with the core palette.
+## Colors & CSS Variables
+- Always prefer Discourse core color variables over ad-hoc ones.
+- Always prefer Discourse core varialbles over CSS rules that override behavior where available.
+- Key CSS custom properties to rely on:
+  - Structure & text: `--primary`, `--primary-high`, `--primary-low`, `--secondary`, `--tertiary`, `--quaternary`.
+  - Links & accents: `--d-link-color` (maps from `--tertiary`), `--tertiary-hover`, related `--*-low/medium/high` variants.
+  - Header: `--header_background`, `--header_primary`.
+  - States: `--highlight`, `--d-selected`, `--d-hover`, `--danger`, `--success`, `--love` and their `-low/-medium/-high` variants.
+  - Borders/backgrounds: `--primary-very-low`, `--primary-low`, `--content-border-color`, etc.
+- For a Christmas look, adjust the theme’s color scheme (in Discourse UI) so these vars naturally produce festive reds/greens/golds instead of hardcoding new palette vars in SCSS.
+- Only introduce new CSS vars when core ones cannot express the effect (e.g., special snow overlays), and keep them narrowly scoped.
+
+## JavaScript in Themes
+- Use the official theme API initializer pattern:
+  - Files under `javascripts/discourse/api-initializers/*.gjs`.
+  - Example skeleton:
+    - `import { apiInitializer } from "discourse/lib/api";`
+    - `export default apiInitializer((api) => { /* run on load */ });`
+- Use `api.onPageChange` for behavior that must run on navigation.
+- Access theme settings via the global `settings` object (e.g., `settings.snow_enabled`).
+
+## HTML Hooks
+- Use these theme template files to inject markup:
+  - `common/header.html` for global elements like canvases or wrappers.
+  - `common/body_tag.html`, `after_header.html`, etc., as needed.
+- Keep injected markup minimal and generic; behavior belongs in `api-initializers`.
+
+## Quick Start for Future Agents
+- If adding visual effects:
+  - Inject required DOM nodes via `common/*.html`.
+  - Implement behavior in `javascripts/discourse/api-initializers/*.gjs` using `api.onPageChange`.
+  - Gate features with theme `settings.yml` (e.g., enable/disable effect, intensity).
+- If adjusting colors:
+  - First, tune the site’s color scheme so core vars (`--primary`, `--secondary`, `--tertiary`, etc.) match the design.
+  - Then use those vars in SCSS; avoid duplicating palette constants.
+- When unsure about a variable or hook, search Discourse core under `/var/www/discourse` for examples before inventing new patterns.
