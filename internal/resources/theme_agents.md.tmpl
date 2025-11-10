@@ -13,14 +13,23 @@ This folder contains a {{if .IsComponent}}theme component{{else}}full theme{{end
 ## Watcher & Preview
 - The runit service `{{.ServiceName}}` keeps `discourse_theme watch` running so edits upload automatically.
 - Control it with `sv status {{.ServiceName}}`, `sv restart {{.ServiceName}}`, or `sv stop {{.ServiceName}}` from inside the container.
-- Logs stream to the service output; check them via `sv restart {{.ServiceName}}` or `docker logs` if needed.
-- Once the watcher completes its first upload, visit `http://127.0.0.1:9292/?preview_theme_id=<THEME_ID>` (use the ID printed by the watcher) to see changes.
 
 ## Workflow Reminders
 1. Edit files under the theme root; SCSS/JS/HTML assets live in `common/`, `desktop/`, and `mobile/`.
-2. Keep the watcher running so changes sync to Discourse automatically; restart it after large refactors or dependency updates.
-3. Run Ruby or Ember specs from `{{.ContainerDiscoursePath}}` when changes affect Discourse core behavior.
-4. Commit work inside the container or extract it to the host mirror before pushing upstream.
-- Create `settings.yml` in the theme root whenever you need custom settings; it isn’t pre-generated.
+2. Run Ruby or Ember specs from `{{.ContainerDiscoursePath}}` when changes affect Discourse core behavior.
+3. Create `settings.yml` in the theme root whenever you need custom settings; it isn’t pre-generated.
 
 Stay focused on Discourse theme development—no knowledge of host tooling is required beyond the paths listed above.
+
+Initialize version control with `git init .` in the theme root when you start a new project so your earliest edits are captured.
+
+## Theme Testing
+- Store theme-focused suites under `test/{unit,integration,acceptance}` inside the theme so the assets and helpers stay bundled; the companion demo `test/unit/demo-theme-test.gjs` shows a minimal QUnit module you can copy.
+- `discourse_theme watch` (managed by `{{.ServiceName}}`) keeps this folder uploaded to the Discourse container, so the tests land under `{{.ContainerDiscoursePath}}/themes/<slug>/test/...` automatically.
+- Execute the suite from the Discourse repo with `cd {{.ContainerDiscoursePath}} && bundle exec rake "themes:qunit[name,{{.ThemeName}}]"`.
+- Lint anything you add via `cd {{.ContainerDiscoursePath}} && bin/lint themes/<slug>/test/unit/demo-theme-test.gjs` (or point it at the specific files you edited).
+
+## Finding core CSS vars quickly
+- Look under `{{.ContainerDiscoursePath}}/app/assets/stylesheets/common/foundation/` for the `colors.scss`/`color_transformations.scss` pair; they list the source `$primary`/`$secondary` variables and their helpers that map to the CSS variables in `color_definitions.scss`.
+- When you need a specific `--var`, search the Discourse repo (e.g., `rg -n -g"color_definitions.scss" --glob "*.scss" color_definitions.scss` or `rg -n "--[a-zA-Z0-9_-]+" app/assets/stylesheets`) to see where it originates and how it’s consumed.
+- In themes, mirror those export points: override the same vars in `common/common.scss` (or desktop/mobile) so theme previews stay in sync with the core palette.

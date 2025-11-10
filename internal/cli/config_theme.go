@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/spf13/cobra"
@@ -22,8 +23,10 @@ import (
 )
 
 const (
-	themeWatcherScriptPath = "/usr/local/bin/dv_theme_watcher.rb"
-	themeAPIKeyDir         = "/home/discourse/.dv/theme_api_keys"
+	themeWatcherScriptPath   = "/usr/local/bin/dv_theme_watcher.rb"
+	themeAPIKeyDir           = "/home/discourse/.dv/theme_api_keys"
+	themeAPIKeyRetryAttempts = 7
+	themeAPIKeyRetryDelay    = 5 * time.Second
 )
 
 type themeCommandContext struct {
@@ -648,18 +651,28 @@ puts api_key.key
 	defer docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", fmt.Sprintf("rm -f %s", shellQuote(containerScriptPath))})
 
 	runnerCmd := fmt.Sprintf("cd %s && RAILS_ENV=development bundle exec rails runner %s", shellQuote(ctx.discourseRoot), shellQuote(containerScriptPath))
-	ctx.verboseLog(cmd, "Generating new API key with: %s", runnerCmd)
-	out, err = docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", runnerCmd})
-	if err != nil {
-		if strings.TrimSpace(out) != "" {
-			ctx.verboseLog(cmd, "Command output:\n%s", strings.TrimSpace(out))
+	var key string
+	var runnerOut string
+	var runnerErr error
+	for attempt := 1; attempt <= themeAPIKeyRetryAttempts; attempt++ {
+		ctx.verboseLog(cmd, "Generating new API key (attempt %d/%d): %s", attempt, themeAPIKeyRetryAttempts, runnerCmd)
+		runnerOut, runnerErr = docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", runnerCmd})
+		if runnerErr == nil {
+			key = lastNonEmptyLine(runnerOut)
+			if key != "" {
+				break
+			}
+			runnerErr = errors.New("rails runner returned empty key output")
+		} else if trimmed := strings.TrimSpace(runnerOut); trimmed != "" {
+			ctx.verboseLog(cmd, "Command output:\n%s", trimmed)
 		}
-		return "", "", fmt.Errorf("failed to create API key: %w", err)
+		if attempt == themeAPIKeyRetryAttempts {
+			return "", "", fmt.Errorf("failed to create API key after %d attempts: %w", themeAPIKeyRetryAttempts, runnerErr)
+		}
+		ctx.verboseLog(cmd, "Theme API key generation not ready (%v); retrying in %s", runnerErr, themeAPIKeyRetryDelay)
+		time.Sleep(themeAPIKeyRetryDelay)
 	}
-	key := lastNonEmptyLine(out)
-	if key == "" {
-		return "", "", errors.New("api_key:create_master did not return a key")
-	}
+
 	saveCmd := fmt.Sprintf("set -euo pipefail; install -d -m 700 %s; printf '%%s\\n' %s > %s && chmod 600 %s", shellQuote(path.Dir(keyPath)), shellQuote(key), shellQuote(keyPath), shellQuote(keyPath))
 	ctx.verboseLog(cmd, "Saving API key via: %s", saveCmd)
 	if _, err := docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", saveCmd}); err != nil {
@@ -739,14 +752,19 @@ exec chpst -u discourse:discourse -U discourse:discourse ruby "$WATCHER_BIN"
 	restartCmd := fmt.Sprintf("sv restart %s >/dev/null 2>&1 || sv start %s >/dev/null 2>&1", serviceName, serviceName)
 	ctx.verboseLog(cmd, "Restarting %s via: %s", serviceName, restartCmd)
 	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"bash", "-lc", restartCmd}); err != nil {
-		return err
+		ctx.verboseLog(cmd, "Watcher restart command failed (continuing anyway): %v", err)
 	}
 
 	statusCmd := fmt.Sprintf("sv status %s", serviceName)
 	ctx.verboseLog(cmd, "Checking watcher health via: %s", statusCmd)
 	statusOut, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"bash", "-lc", statusCmd})
 	if err != nil {
-		return fmt.Errorf("watcher service %s unhealthy: %s", serviceName, strings.TrimSpace(statusOut))
+		msg := strings.TrimSpace(statusOut)
+		if msg == "" {
+			msg = err.Error()
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "Watcher service %s not ready yet (%s). Check later with 'sv status %s'.\n", serviceName, msg, serviceName)
+		return nil
 	}
 	ctx.verboseLog(cmd, "Watcher status: %s", strings.TrimSpace(statusOut))
 	return nil
