@@ -30,12 +30,20 @@ const (
 )
 
 type themeCommandContext struct {
-	cfg               *config.Config
-	configDir         string
-	containerName     string
-	discourseRoot     string
-	hostDiscoursePath string
-	verbose           bool
+	cfg           *config.Config
+	configDir     string
+	containerName string
+	discourseRoot string
+	dataDir       string
+	verbose       bool
+}
+
+func (ctx themeCommandContext) hostMirrorPath(slug string) string {
+	clean := themeDirSlug(slug)
+	if clean == "" {
+		clean = "theme"
+	}
+	return filepath.Join(ctx.dataDir, fmt.Sprintf("%s_src", clean))
 }
 
 func (ctx themeCommandContext) verboseLog(cmd *cobra.Command, format string, args ...interface{}) {
@@ -109,12 +117,12 @@ theme root so AI tooling understands the layout.`,
 		}
 
 		ctx := themeCommandContext{
-			cfg:               &cfg,
-			configDir:         configDir,
-			containerName:     containerName,
-			discourseRoot:     discourseRoot,
-			hostDiscoursePath: filepath.Join(dataDir, "discourse_src"),
-			verbose:           verboseFlag,
+			cfg:           &cfg,
+			configDir:     configDir,
+			containerName: containerName,
+			discourseRoot: discourseRoot,
+			dataDir:       dataDir,
+			verbose:       verboseFlag,
 		}
 
 		themeNameFlag, _ := cmd.Flags().GetString("theme-name")
@@ -154,6 +162,7 @@ func handleThemeScaffold(cmd *cobra.Command, ctx themeCommandContext, flagName s
 	dirSlug := themeDirSlug(name)
 	serviceName := fmt.Sprintf("theme-watch-%s", dirSlug)
 	themePath := path.Join("/home/discourse", dirSlug)
+	hostMirrorPath := ctx.hostMirrorPath(dirSlug)
 	if err := ensureContainerPathAvailable(ctx.containerName, themePath); err != nil {
 		return err
 	}
@@ -164,17 +173,23 @@ func handleThemeScaffold(cmd *cobra.Command, ctx themeCommandContext, flagName s
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Creating theme skeleton at %s...\n", themePath)
-	if err := scaffoldThemeIntoContainer(ctx, name, isComponent, serviceName, themePath, ""); err != nil {
+	if err := scaffoldThemeIntoContainer(ctx, name, isComponent, serviceName, themePath, "", hostMirrorPath); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Initializing git repository (main) inside %s...\n", themePath)
+	if err := ensureThemeGitRepo(cmd, ctx, themePath); err != nil {
 		return err
 	}
 
 	serviceName, err = finalizeThemeWorkspace(cmd, ctx, finalizeThemeOptions{
-		DisplayName: name,
-		ThemePath:   themePath,
-		RepoURL:     "",
-		IsComponent: isComponent,
-		Slug:        dirSlug,
-		ServiceName: serviceName,
+		DisplayName:    name,
+		ThemePath:      themePath,
+		RepoURL:        "",
+		IsComponent:    isComponent,
+		Slug:           dirSlug,
+		ServiceName:    serviceName,
+		HostMirrorPath: hostMirrorPath,
 	})
 	if err != nil {
 		return err
@@ -196,6 +211,7 @@ func handleThemeClone(cmd *cobra.Command, ctx themeCommandContext, rawRepo strin
 	dirSlug := themeDirSlug(name)
 	serviceName := fmt.Sprintf("theme-watch-%s", dirSlug)
 	themePath := path.Join("/home/discourse", dirSlug)
+	hostMirrorPath := ctx.hostMirrorPath(dirSlug)
 	if err := ensureContainerPathAvailable(ctx.containerName, themePath); err != nil {
 		return err
 	}
@@ -222,12 +238,13 @@ func handleThemeClone(cmd *cobra.Command, ctx themeCommandContext, rawRepo strin
 	}
 
 	serviceName, err = finalizeThemeWorkspace(cmd, ctx, finalizeThemeOptions{
-		DisplayName: name,
-		ThemePath:   themePath,
-		RepoURL:     repoURL,
-		IsComponent: isComponent,
-		Slug:        dirSlug,
-		ServiceName: serviceName,
+		DisplayName:    name,
+		ThemePath:      themePath,
+		RepoURL:        repoURL,
+		IsComponent:    isComponent,
+		Slug:           dirSlug,
+		ServiceName:    serviceName,
+		HostMirrorPath: hostMirrorPath,
 	})
 	if err != nil {
 		return err
@@ -238,12 +255,13 @@ func handleThemeClone(cmd *cobra.Command, ctx themeCommandContext, rawRepo strin
 }
 
 type finalizeThemeOptions struct {
-	DisplayName string
-	ThemePath   string
-	RepoURL     string
-	IsComponent bool
-	Slug        string
-	ServiceName string
+	DisplayName    string
+	ThemePath      string
+	RepoURL        string
+	IsComponent    bool
+	Slug           string
+	ServiceName    string
+	HostMirrorPath string
 }
 
 func finalizeThemeWorkspace(cmd *cobra.Command, ctx themeCommandContext, opts finalizeThemeOptions) (string, error) {
@@ -251,7 +269,11 @@ func finalizeThemeWorkspace(cmd *cobra.Command, ctx themeCommandContext, opts fi
 	if strings.TrimSpace(serviceName) == "" {
 		serviceName = fmt.Sprintf("theme-watch-%s", opts.Slug)
 	}
-	if err := writeAgentFileToContainer(ctx, opts.ThemePath, opts.DisplayName, opts.RepoURL, serviceName, opts.IsComponent); err != nil {
+	hostMirror := strings.TrimSpace(opts.HostMirrorPath)
+	if hostMirror == "" {
+		hostMirror = ctx.hostMirrorPath(opts.Slug)
+	}
+	if err := writeAgentFileToContainer(ctx, opts.ThemePath, opts.DisplayName, opts.RepoURL, serviceName, opts.IsComponent, hostMirror); err != nil {
 		return "", err
 	}
 	if err := configureThemeWatcher(cmd, ctx, opts, serviceName); err != nil {
@@ -376,7 +398,7 @@ func installDiscourseThemeGem(cmd *cobra.Command, containerName string) error {
 	return nil
 }
 
-func scaffoldThemeIntoContainer(ctx themeCommandContext, displayName string, isComponent bool, serviceName, themePath, repoURL string) error {
+func scaffoldThemeIntoContainer(ctx themeCommandContext, displayName string, isComponent bool, serviceName, themePath, repoURL, hostMirrorPath string) error {
 	tempDir, err := os.MkdirTemp("", "dv-theme-")
 	if err != nil {
 		return err
@@ -395,7 +417,7 @@ func scaffoldThemeIntoContainer(ctx themeCommandContext, displayName string, isC
 		ThemePath:              themePath,
 		ContainerName:          ctx.containerName,
 		ContainerDiscoursePath: ctx.discourseRoot,
-		HostDiscoursePath:      ctx.hostDiscoursePath,
+		HostDiscoursePath:      hostMirrorPath,
 		RepositoryURL:          repoURL,
 	}); err != nil {
 		return err
@@ -411,13 +433,13 @@ func scaffoldThemeIntoContainer(ctx themeCommandContext, displayName string, isC
 	return nil
 }
 
-func writeAgentFileToContainer(ctx themeCommandContext, themePath, displayName, repoURL, serviceName string, isComponent bool) error {
+func writeAgentFileToContainer(ctx themeCommandContext, themePath, displayName, repoURL, serviceName string, isComponent bool, hostMirrorPath string) error {
 	content, err := resources.RenderThemeAgent(resources.ThemeAgentData{
 		ThemeName:              displayName,
 		ThemePath:              themePath,
 		ContainerName:          ctx.containerName,
 		ContainerDiscoursePath: ctx.discourseRoot,
-		HostDiscoursePath:      ctx.hostDiscoursePath,
+		HostDiscoursePath:      hostMirrorPath,
 		RepositoryURL:          repoURL,
 		ServiceName:            serviceName,
 		IsComponent:            isComponent,
@@ -462,6 +484,31 @@ func setCustomWorkdir(ctx themeCommandContext, themePath string) error {
 	}
 	ctx.cfg.CustomWorkdirs[ctx.containerName] = cleaned
 	return config.Save(ctx.configDir, *ctx.cfg)
+}
+
+func ensureThemeGitRepo(cmd *cobra.Command, ctx themeCommandContext, themePath string) error {
+	script := `set -u
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  exit 0
+fi
+if git init -b main >/dev/null 2>&1; then
+  exit 0
+fi
+if git init >/dev/null 2>&1; then
+  git branch -M main >/dev/null 2>&1 && exit 0
+fi
+exit 1
+`
+	out, err := docker.ExecOutput(ctx.containerName, themePath, []string{"bash", "-lc", script})
+	if err != nil {
+		trimmed := strings.TrimSpace(out)
+		if trimmed != "" {
+			ctx.verboseLog(cmd, "git init output:\n%s", trimmed)
+			return fmt.Errorf("failed to initialize git repo in %s: %s", themePath, trimmed)
+		}
+		return fmt.Errorf("failed to initialize git repo in %s: %w", themePath, err)
+	}
+	return nil
 }
 
 type themeSkeletonPayload struct {

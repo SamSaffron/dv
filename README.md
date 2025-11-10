@@ -207,7 +207,7 @@ Copy modified files from the running container’s `/var/www/discourse` into a l
 dv extract [--name NAME] [--sync] [--debug]
 ```
 
-By default, the destination is `${XDG_DATA_HOME}/dv/discourse_src`.
+By default, the destination is `${XDG_DATA_HOME}/dv/discourse_src`. When a container uses a custom workdir (for example, a theme under `/home/discourse/winter-colors`), the extract target becomes `${XDG_DATA_HOME}/dv/<workdir-slug>_src` so each workspace mirrors into its own folder.
 
 `--sync` keeps the container and host codebases synchronized after the initial extract by watching for changes in both environments (press `Ctrl+C` to exit). `--debug` adds verbose logging while in sync mode. These flags cannot be combined with `--chdir` or `--echo-cd`.
 
@@ -420,6 +420,7 @@ The image is based on `discourse/discourse_dev:release` and includes:
 3. Extract changes to a local clone and commit:
    ```bash
    dv extract
+   # For the default Discourse workdir; custom workdirs land in $(dv data)/<slug>_src
    cd $(dv data)/discourse_src
    git add . && git commit -m "Your message"
    ```

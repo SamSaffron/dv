@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -63,6 +64,32 @@ var extractCmd = &cobra.Command{
 			return err
 		}
 		work := config.EffectiveWorkdir(cfg, imgCfg, name)
+
+		customWorkdir := ""
+		if cfg.CustomWorkdirs != nil {
+			customWorkdir = strings.TrimSpace(cfg.CustomWorkdirs[name])
+		}
+		useCustomExtractor := customWorkdir != "" && path.Clean(customWorkdir) == path.Clean(work)
+		if useCustomExtractor {
+			localRepo := workspaceLocalPath(dataDir, work)
+			base := filepath.Base(work)
+			if base == "" || base == "." || base == string(filepath.Separator) {
+				base = name
+			}
+			display := fmt.Sprintf("workspace %s", base)
+			return extractWorkspaceRepo(workspaceExtractOptions{
+				cmd:              cmd,
+				containerName:    name,
+				containerWorkdir: work,
+				localRepo:        localRepo,
+				branchName:       name,
+				displayName:      display,
+				chdir:            chdir,
+				echoCd:           echoCd,
+				syncMode:         syncMode,
+				syncDebug:        syncDebug,
+			})
+		}
 		// Check for changes
 		status, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git status --porcelain"})
 		if err != nil {

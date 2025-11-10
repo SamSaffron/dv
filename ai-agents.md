@@ -35,7 +35,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 - Config: `${XDG_CONFIG_HOME}/dv/config.json` (fallback: `~/.config/dv/config.json`)
 - Data: `${XDG_DATA_HOME}/dv` (fallback: `~/.local/share/dv`)
 - `selectedAgent` in config identifies current container
-- `dv extract` uses `${XDG_DATA_HOME}/dv/discourse_src` for local clone
+- `dv extract` writes to `${XDG_DATA_HOME}/dv/discourse_src` by default; when a container overrides its workdir, the destination becomes `${XDG_DATA_HOME}/dv/<workdir-slug>_src`.
 - Dockerfile tracked under `${XDG_CONFIG_HOME}/dv` unless overridden
 
 ## Operational Guidelines
@@ -46,7 +46,7 @@ This guide documents the repository purpose, key files, and operational guidelin
   - `dv enter` (interactive shell)
 - Launch preconfigured CLIs inside the container with `dv run-agent` / `dv ra`
 - Manage containers via `dv new|select|list|rename`
-- Export changes with `dv extract`, then commit in `${XDG_DATA_HOME}/dv/discourse_src`
+- Export changes with `dv extract`, then commit in `${XDG_DATA_HOME}/dv/discourse_src` (or the slugged custom path when using `dv config workdir` or `dv config theme`)
 - Use `dv extract --sync` (optionally `--debug`) to keep the host and container code trees synchronized in real time; press `Ctrl+C` to stop sync mode
 - Ensure the container has `inotifywait` available (install the `inotify-tools` package or equivalent) before starting sync mode
 - If host port conflicts, use `--host-port` or stop conflicting service
@@ -77,7 +77,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `dv config workdir [PATH|--reset]` — Override (or clear) the selected container’s workdir (use `--container` to target another agent).
 
 ### Code Sync & Git Integration
-- `dv extract [--sync|--debug|--chdir|--echo-cd]` — Copy the container workspace into `${XDG_DATA_HOME}/dv/discourse_src`, optionally keep it bidirectionally synced or emit a `cd` command.
+- `dv extract [--sync|--debug|--chdir|--echo-cd]` — Copy the active workspace into `${XDG_DATA_HOME}/dv/discourse_src` (default workdir) or `${XDG_DATA_HOME}/dv/<workdir-slug>_src` for custom workdirs, optionally keep it bidirectionally synced or emit a `cd` command.
 - `dv extract plugin <name>` — Mirror a plugin repo beneath `${XDG_DATA_HOME}/dv/<plugin>_src`, respecting Git remotes.
 - `dv import [--base main]` — Push local commits/uncommitted work from the host repo into the running container.
 - `dv branch BRANCH`, `dv pr NUMBER` — Checkout upstream branches or GitHub PRs inside the container and rerun migrations/seed steps.

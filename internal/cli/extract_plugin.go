@@ -1,11 +1,7 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -137,254 +133,20 @@ done
 
 		pluginWork := filepath.Join(work, "plugins", pluginName)
 
-		// Detect if plugin is a git repo separate from core
-		isRepoOut, _ := docker.ExecOutput(name, pluginWork, []string{"bash", "-lc", "git rev-parse --is-inside-work-tree 2>/dev/null || echo false"})
-		isRepo := strings.Contains(strings.ToLower(isRepoOut), "true")
-
-		// Configure output behavior
-		var logOut io.Writer = cmd.OutOrStdout()
-		var procOut io.Writer = cmd.OutOrStdout()
-		var procErr io.Writer = cmd.ErrOrStderr()
-		if echoCd {
-			logOut = io.Discard
-			procOut = cmd.ErrOrStderr()
-			procErr = cmd.ErrOrStderr()
-		}
-
-		// Prepare destination
 		localRepo := filepath.Join(dataDir, fmt.Sprintf("%s_src", pluginName))
-
-		if !isRepo {
-			// Non-git plugin: copy entire directory into destination
-			_ = os.RemoveAll(localRepo)
-			if err := os.MkdirAll(localRepo, 0o755); err != nil {
-				return err
-			}
-			fmt.Fprintln(logOut, "Copying plugin directory (non-git repo detected)...")
-			// Copy contents rather than nesting
-			if err := docker.CopyFromContainer(name, filepath.Join(pluginWork, "."), localRepo); err != nil {
-				return err
-			}
-			if echoCd {
-				fmt.Fprintf(cmd.OutOrStdout(), "cd %s\n", localRepo)
-				return nil
-			}
-			fmt.Fprintln(logOut, "")
-			fmt.Fprintln(logOut, "✅ Plugin copied successfully!")
-			fmt.Fprintf(logOut, "📁 Location: %s\n", localRepo)
-			if chdir {
-				shell := os.Getenv("SHELL")
-				if strings.TrimSpace(shell) == "" {
-					shell = "/bin/bash"
-				}
-				s := exec.Command(shell)
-				s.Dir = localRepo
-				s.Stdin = os.Stdin
-				s.Stdout = os.Stdout
-				s.Stderr = os.Stderr
-				return s.Run()
-			}
-			return nil
-		}
-
-		// Git-backed plugin: proceed similar to core extract
-		status, err := docker.ExecOutput(name, pluginWork, []string{"bash", "-lc", "git status --porcelain"})
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(status) == "" {
-			if syncMode {
-				status = ""
-			} else {
-				return fmt.Errorf("no changes detected in %s", pluginWork)
-			}
-		}
-
-		// Determine repo URL
-		repoCloneUrl, _ := docker.ExecOutput(name, pluginWork, []string{"bash", "-lc", "git config --get remote.origin.url"})
-		repoCloneUrl = strings.TrimSpace(repoCloneUrl)
-		if repoCloneUrl == "" {
-			// Fallback: if no remote, treat like non-git copy
-			_ = os.RemoveAll(localRepo)
-			if err := os.MkdirAll(localRepo, 0o755); err != nil {
-				return err
-			}
-			fmt.Fprintln(logOut, "Copying plugin directory (no remote detected)...")
-			if err := docker.CopyFromContainer(name, filepath.Join(pluginWork, "."), localRepo); err != nil {
-				return err
-			}
-			if echoCd {
-				fmt.Fprintf(cmd.OutOrStdout(), "cd %s\n", localRepo)
-				return nil
-			}
-			fmt.Fprintln(logOut, "")
-			fmt.Fprintln(logOut, "✅ Plugin copied successfully!")
-			fmt.Fprintf(logOut, "📁 Location: %s\n", localRepo)
-			if chdir {
-				shell := os.Getenv("SHELL")
-				if strings.TrimSpace(shell) == "" {
-					shell = "/bin/bash"
-				}
-				s := exec.Command(shell)
-				s.Dir = localRepo
-				s.Stdin = os.Stdin
-				s.Stdout = os.Stdout
-				s.Stderr = os.Stderr
-				return s.Run()
-			}
-			return nil
-		}
-
-		// Ensure local clone
-		if _, err := os.Stat(localRepo); os.IsNotExist(err) {
-			candidates := makeCloneCandidates(repoCloneUrl)
-			fmt.Fprintf(logOut, "Cloning (trying %d URL(s))...\n", len(candidates))
-			if err := cloneWithFallback(procOut, procErr, candidates, localRepo); err != nil {
-				return err
-			}
-		} else {
-			fmt.Fprintln(logOut, "Using existing repo, resetting...")
-			if err := runInDir(localRepo, procOut, procErr, "git", "reset", "--hard", "HEAD"); err != nil {
-				return err
-			}
-			if err := runInDir(localRepo, procOut, procErr, "git", "clean", "-fd"); err != nil {
-				return err
-			}
-			if err := runInDir(localRepo, procOut, procErr, "git", "fetch", "origin"); err != nil {
-				return err
-			}
-		}
-
-		// Get container commit and branch for plugin
-		commit, err := docker.ExecOutput(name, pluginWork, []string{"bash", "-lc", "git rev-parse HEAD"})
-		if err != nil {
-			return err
-		}
-		commit = strings.TrimSpace(commit)
-		containerBranch, err := docker.ExecOutput(name, pluginWork, []string{"bash", "-lc", "git rev-parse --abbrev-ref HEAD"})
-		if err != nil {
-			return err
-		}
-		containerBranch = strings.TrimSpace(containerBranch)
-		fmt.Fprintf(logOut, "Container plugin is at commit: %s\n", commit)
-		if containerBranch != "" {
-			fmt.Fprintf(logOut, "Container plugin branch: %s\n", containerBranch)
-		}
-
-		// Checkout strategy
-		branchDisplay := ""
-		commitExists := commitExistsInRepo(localRepo, commit)
-		if commitExists {
-			if containerBranch != "" && containerBranch != "HEAD" {
-				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", containerBranch, commit); err != nil {
-					return err
-				}
-				branchDisplay = containerBranch
-			} else {
-				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "--detach", commit); err != nil {
-					return err
-				}
-				branchDisplay = "HEAD (detached)"
-			}
-		} else {
-			baseRef := ""
-			if containerBranch != "" && containerBranch != "HEAD" {
-				candidate := "origin/" + containerBranch
-				if refExists(localRepo, candidate) {
-					baseRef = candidate
-				}
-			}
-			if baseRef == "" {
-				if refExists(localRepo, "origin/main") {
-					baseRef = "origin/main"
-				} else if refExists(localRepo, "origin/master") {
-					baseRef = "origin/master"
-				} else if refExists(localRepo, "origin/HEAD") {
-					baseRef = "origin/HEAD"
-				}
-			}
-			branchName := pluginName
-			if baseRef != "" {
-				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName, baseRef); err != nil {
-					return err
-				}
-			} else {
-				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName); err != nil {
-					return err
-				}
-			}
-			branchDisplay = branchName
-		}
-
-		// Extract changes
-		fmt.Fprintln(logOut, "Extracting plugin changes from container...")
-		scanner := bufio.NewScanner(strings.NewReader(status))
-		changedCount := 0
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			changedCount++
-			st := line[:2]
-			rel := strings.TrimSpace(line[3:])
-			absDst := filepath.Join(localRepo, rel)
-			if st == "??" || strings.ContainsAny(st, "AM") {
-				_ = os.MkdirAll(filepath.Dir(absDst), 0o755)
-				if err := docker.CopyFromContainer(name, filepath.Join(pluginWork, rel), absDst); err != nil {
-					fmt.Fprintf(logOut, "Warning: could not copy %s\n", rel)
-				}
-			} else if strings.Contains(st, "D") {
-				_ = os.Remove(absDst)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			return err
-		}
-
-		if echoCd {
-			fmt.Fprintf(cmd.OutOrStdout(), "cd %s\n", localRepo)
-			return nil
-		}
-
-		fmt.Fprintln(logOut, "")
-		fmt.Fprintln(logOut, "✅ Plugin changes extracted successfully!")
-		fmt.Fprintf(logOut, "📁 Location: %s\n", localRepo)
-		if strings.TrimSpace(branchDisplay) != "" {
-			fmt.Fprintf(logOut, "🌿 Branch: %s\n", branchDisplay)
-		}
-		fmt.Fprintf(logOut, "📊 Files changed: %d\n", changedCount)
-		fmt.Fprintf(logOut, "🎯 Base commit: %s\n", commit)
-
-		if syncMode {
-			if changedCount == 0 {
-				fmt.Fprintln(logOut, "No pending changes detected; watching for new modifications...")
-			}
-			fmt.Fprintln(logOut, "🔄 Entering sync mode; press Ctrl+C to stop.")
-			return runExtractSync(cmd, syncOptions{
-				containerName:    name,
-				containerWorkdir: pluginWork,
-				localRepo:        localRepo,
-				logOut:           logOut,
-				errOut:           cmd.ErrOrStderr(),
-				debug:            syncDebug,
-			})
-		}
-
-		if chdir {
-			shell := os.Getenv("SHELL")
-			if strings.TrimSpace(shell) == "" {
-				shell = "/bin/bash"
-			}
-			s := exec.Command(shell)
-			s.Dir = localRepo
-			s.Stdin = os.Stdin
-			s.Stdout = os.Stdout
-			s.Stderr = os.Stderr
-			return s.Run()
-		}
-
-		return nil
+		display := fmt.Sprintf("plugin %s", pluginName)
+		return extractWorkspaceRepo(workspaceExtractOptions{
+			cmd:              cmd,
+			containerName:    name,
+			containerWorkdir: pluginWork,
+			localRepo:        localRepo,
+			branchName:       pluginName,
+			displayName:      display,
+			chdir:            chdir,
+			echoCd:           echoCd,
+			syncMode:         syncMode,
+			syncDebug:        syncDebug,
+		})
 	},
 }
 
