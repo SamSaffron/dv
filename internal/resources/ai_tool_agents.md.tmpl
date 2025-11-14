@@ -1,0 +1,75 @@
+# Discourse AI Tool Workspace — {{.ToolDisplayName}}
+
+This directory is dedicated to building the custom tool `{{.ToolName}}` inside container `{{.ContainerName}}`. Everything the agents need to edit, test, and sync the tool lives here.
+
+## Paths & Commands
+- Workspace root: `{{.WorkspacePath}}`
+- Metadata: `{{.ConfigPath}}`
+- Script: `{{.ScriptPath}}`
+- Test payload: `{{.TestPayloadPath}}`
+- Rails app: `{{.DiscourseRoot}}`
+- Apply changes: `cd {{.WorkspacePath}} && ./bin/sync`
+- Run tool locally: `cd {{.WorkspacePath}} && ./bin/test [payload.json]`
+{{- if .PresetName }}
+- Seed preset: **{{.PresetName}}** — {{.PresetDescription}}
+{{- end }}
+
+## Workflow
+1. Update `tool.yml` with the tool’s name, summary, description, parameters, and optional RAG settings shown below.
+2. Edit `script.js`. It already includes the Discourse sandbox preamble—focus on `invoke(parameters)` plus any helper functions (`details()`, `customContext()`).
+3. Keep `test_payload.json` in sync with the parameters so `./bin/test` exercises typical requests.
+4. Run `./bin/test` to execute the tool in-process using Discourse’s `AiTool` runner and the first configured LLM.
+5. Run `./bin/sync` to upsert the tool into Discourse (`tool_name` is used for idempotency) and bump persona caches.
+6. Visit `/admin/plugins/discourse-ai/ai-tools` to confirm the entry, then attach it to personas under `/admin/plugins/discourse-ai/ai-personas`.
+
+## tool.yml schema
+- `name`: UI label shown across the admin screens (<=100 chars).
+- `tool_name`: Alphanumeric/underscore identifier provided to the LLM; must be unique per site.
+- `summary`: Short blurb shown to end users when multiple tools are available.
+- `description`: Rich instructions for the LLM explaining when and how to call the tool.
+- `parameters`: Array of `{ name, type (string|number|boolean|array), description, required, enum? }`.
+- `rag`: Optional chunk token, overlap token, and indexing LLM overrides for attached uploads.
+
+{{- if .ParameterSummary }}
+### Current parameters
+{{- range .ParameterSummary }}
+- `{{.Name}}` ({{.Type}}{{if .Required}}, required{{end}}): {{.Description}}
+{{- end }}
+{{- else }}
+### Current parameters
+- None defined yet. Add entries under `parameters:` inside `tool.yml`.
+{{- end }}
+
+## Runtime API quick reference
+- Entry points:
+  - `invoke(parameters)` must return JSON-serializable data. Throw errors for fatal conditions so the host LLM can react.
+  - `details()` can summarize results for humans (e.g., show a link) and is rendered beside the chat transcript.
+  - `customContext()` can prepend extra text to the final user-visible message when the tool needs to inject context.
+- Helpers inside `script.js`:
+  - `http.get|post|put|patch|delete(url, { headers, body })` for outbound requests (≤20 calls/run).
+  - `llm.truncate(text, tokens)` and `llm.generate(prompt, options?)` for follow-up generations.
+  - `index.search(query, { filenames, limit })` to query RAG uploads linked to this tool.
+  - `upload.create(filename, base64)`, `upload.getUrl(short_url)`, and `upload.getBase64(id, maxPixels)` for handling attachments.
+  - `chain.setCustomRaw(raw)` / `chain.streamCustomRaw(raw)` to override the final chat response mid-run.
+  - `discourse.search`, `discourse.getPost`, `discourse.getTopic`, `discourse.getUser`, `discourse.getPersona(name).respondTo/update`,
+    `discourse.createChatMessage`, `discourse.createStagedUser`, `discourse.createTopic`, and `discourse.createPost`.
+  - `context` provides `post_id`, `topic_id`, PM participant usernames, chat `message_id`/`channel_id`, and invoking user metadata.
+  - `sleep(ms)` throttles polling APIs (≤30 calls, each ≤60 000 ms).
+- Limits: ~2000 ms of script time (HTTP + `llm.generate` pause the timer), ≤10 MB heap usage, ≤20 stack depth, ≤20 HTTP requests. Exceeding any limit raises a runtime error.
+
+## RAG & uploads
+- Adjust `rag.chunk_tokens` (default 374) and `rag.chunk_overlap_tokens` (default 10) when ingesting longer documents for semantic search.
+- `rag.llm_model_id` controls which LLM handles OCR during indexing for PDFs/images; leave `null` to fall back to the global default.
+- Upload PDFs, Markdown, text, or supported images via the admin UI (`RAG uploads`). This workspace only tracks metadata—the actual uploads live inside Discourse’s database.
+
+## Testing
+- `./bin/test [payload.json]` loads `tool.yml`, `script.js`, and the chosen payload (defaults to `test_payload.json`), builds an unsaved `AiTool`, and runs it with the first configured LLM. Configure LLMs under Admin → Plugins → Discourse AI → LLMs.
+- Update the payload whenever parameter shapes change so regressions surface early.
+- Script errors, stack traces, and `console.log` output show up directly in the CLI for quick debugging.
+
+## Syncing & rollout
+- `./bin/sync` upserts the tool (`tool_name` is the key) and sets the creator to the first admin user when creating a new record. It is safe to re-run after each edit.
+- After syncing, open the persona editor and enable the tool under *Tools* or *Forced tools*. Persona exports will include this tool automatically.
+- Use the admin UI’s export button when you want to generate a distributable JSON file for others.
+
+Stay within the paths listed above; agents never need host-side context to complete AI tool work from this workspace.

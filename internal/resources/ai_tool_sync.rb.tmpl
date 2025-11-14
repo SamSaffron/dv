@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "yaml"
+require "json"
+require "active_support/core_ext/object/blank"
+
+WORKSPACE_ROOT = ENV["DV_AI_TOOL_ROOT"] || File.expand_path("..", __dir__)
+CONFIG_PATH = File.join(WORKSPACE_ROOT, "tool.yml")
+SCRIPT_PATH = File.join(WORKSPACE_ROOT, "script.js")
+
+def abort_with(message)
+  STDERR.puts("[ai-tool sync] #{message}")
+  exit(1)
+end
+
+abort_with("Missing #{CONFIG_PATH}") unless File.exist?(CONFIG_PATH)
+abort_with("Missing #{SCRIPT_PATH}") unless File.exist?(SCRIPT_PATH)
+
+def load_yaml(path)
+  YAML.safe_load(File.read(path), permitted_classes: [Date], aliases: true) || {}
+rescue Psych::SyntaxError => e
+  abort_with("Invalid YAML in #{path}: #{e.message}")
+end
+
+config = load_yaml(CONFIG_PATH)
+script_source = File.read(SCRIPT_PATH)
+
+name = config["name"].to_s.strip
+tool_name = config["tool_name"].to_s.strip
+description = config["description"].to_s.strip
+summary = config["summary"].to_s.strip
+
+abort_with("Set 'name' inside tool.yml") if name.blank?
+abort_with("Set 'tool_name' inside tool.yml") if tool_name.blank?
+abort_with("Set 'description' inside tool.yml") if description.blank?
+abort_with("Set 'summary' inside tool.yml") if summary.blank?
+
+parameters =
+  Array(config["parameters"]).map do |param|
+    {
+      name: param["name"].to_s.strip,
+      type: param["type"].to_s.strip.presence || "string",
+      description: param["description"].to_s.strip,
+      required: !!param["required"],
+      enum: Array(param["enum"]).map(&:to_s).reject(&:blank?),
+    }.tap do |hash|
+      hash.delete(:enum) if hash[:enum].blank?
+    end
+  end
+
+rag_cfg = config["rag"] || {}
+
+payload = {
+  name: name,
+  tool_name: tool_name,
+  description: description,
+  summary: summary,
+  parameters: parameters,
+  script: script_source,
+}
+payload[:rag_chunk_tokens] = rag_cfg["chunk_tokens"].to_i if rag_cfg["chunk_tokens"].present?
+payload[:rag_chunk_overlap_tokens] = rag_cfg["chunk_overlap_tokens"].to_i if rag_cfg["chunk_overlap_tokens"].present?
+if rag_cfg.key?("llm_model_id") && !rag_cfg["llm_model_id"].nil?
+  payload[:rag_llm_model_id] = rag_cfg["llm_model_id"].to_i
+end
+
+creator = User.where(admin: true).order(:id).first || Discourse.system_user
+abort_with("Could not find an admin user or the Discourse system user") unless creator
+
+tool = AiTool.find_or_initialize_by(tool_name: tool_name)
+tool.assign_attributes(payload)
+tool.created_by ||= creator
+
+if tool.save
+  puts JSON.pretty_generate(
+         {
+           id: tool.id,
+           tool_name: tool.tool_name,
+           name: tool.name,
+           updated_at: tool.updated_at,
+         },
+       )
+else
+  abort_with("Failed to save tool:\n- #{tool.errors.full_messages.join("\n- ")}")
+end

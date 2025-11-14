@@ -279,7 +279,7 @@ func finalizeThemeWorkspace(cmd *cobra.Command, ctx themeCommandContext, opts fi
 	if err := configureThemeWatcher(cmd, ctx, opts, serviceName); err != nil {
 		return "", err
 	}
-	if err := setCustomWorkdir(ctx, opts.ThemePath); err != nil {
+	if err := setContainerWorkdir(ctx.cfg, ctx.configDir, ctx.containerName, opts.ThemePath); err != nil {
 		return "", err
 	}
 	return serviceName, nil
@@ -472,18 +472,6 @@ func writeAgentFileToContainer(ctx themeCommandContext, themePath, displayName, 
 		return fmt.Errorf("failed to set ownership on %s: %w", agentPath, err)
 	}
 	return nil
-}
-
-func setCustomWorkdir(ctx themeCommandContext, themePath string) error {
-	cleaned := path.Clean(themePath)
-	if !strings.HasPrefix(cleaned, "/") {
-		return fmt.Errorf("expected absolute path, got %s", cleaned)
-	}
-	if ctx.cfg.CustomWorkdirs == nil {
-		ctx.cfg.CustomWorkdirs = map[string]string{}
-	}
-	ctx.cfg.CustomWorkdirs[ctx.containerName] = cleaned
-	return config.Save(ctx.configDir, *ctx.cfg)
 }
 
 func ensureThemeGitRepo(cmd *cobra.Command, ctx themeCommandContext, themePath string) error {
