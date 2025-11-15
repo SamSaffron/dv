@@ -35,6 +35,7 @@ const (
 	modeBrowse
 	modeCreate
 	modeConfirmDelete
+	modeSaving
 )
 
 type aiConfigOptions struct {
@@ -68,6 +69,7 @@ type aiConfigModel struct {
 	busy            bool
 	busyMessage     string
 	loadingProgress []string
+	savingMessage   string
 	help            help.Model
 	llmList         list.Model
 	modelList       list.Model
@@ -184,68 +186,88 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeConfirmDelete && m.deleteLLM != nil {
 			return m.updateDeleteConfirm(msg)
 		}
-		switch msg.String() {
-		case "tab", "ctrl+i":
-			if m.focus == focusConfigured {
-				m.focus = focusCatalog
-			} else {
-				m.focus = focusConfigured
-			}
-		case "shift+tab":
-			if m.focus == focusCatalog {
-				m.focus = focusConfigured
-			} else {
-				m.focus = focusCatalog
-			}
-		case "q", "esc", "ctrl+c":
-			return m, tea.Quit
-		case "r":
-			m.busy = true
-			m.busyMessage = "Refreshing models..."
-			return m, m.fetchStateCmd("Refreshed models")
-		case "enter":
-			if m.focus == focusConfigured {
-				if item, ok := m.llmList.SelectedItem().(llmItem); ok {
-					if item.model.ID != m.state.DefaultID {
-						m.busy = true
-						m.busyMessage = "Setting default model..."
-						return m, m.setDefaultCmd(item.model.ID, item.model.DisplayName)
+
+		// Check if we're currently filtering - if so, don't process single-key shortcuts
+		isFiltering := false
+		if m.focus == focusConfigured {
+			isFiltering = m.llmList.FilterState() == list.Filtering
+		} else if m.focus == focusCatalog {
+			isFiltering = m.modelList.FilterState() == list.Filtering
+		}
+
+		// Only process single-key shortcuts when not filtering
+		if !isFiltering {
+			switch msg.String() {
+			case "tab", "ctrl+i":
+				if m.focus == focusConfigured {
+					m.focus = focusCatalog
+				} else {
+					m.focus = focusConfigured
+				}
+			case "shift+tab":
+				if m.focus == focusCatalog {
+					m.focus = focusConfigured
+				} else {
+					m.focus = focusCatalog
+				}
+			case "q", "esc", "ctrl+c":
+				return m, tea.Quit
+			case "r":
+				m.busy = true
+				m.busyMessage = "Refreshing models..."
+				return m, m.fetchStateCmd("Refreshed models")
+			case "enter":
+				if m.focus == focusConfigured {
+					if item, ok := m.llmList.SelectedItem().(llmItem); ok {
+						if item.model.ID != m.state.DefaultID {
+							m.busy = true
+							m.busyMessage = "Setting default model..."
+							return m, m.setDefaultCmd(item.model.ID, item.model.DisplayName)
+						}
+					}
+				} else if m.focus == focusCatalog {
+					if item, ok := m.modelList.SelectedItem().(providerItem); ok && item.model.ID != "" && !item.locked {
+						m.form = newCreateForm(item.entryID, item.model, m.state.Meta, m.env)
+						m.mode = modeCreate
+						m.toast = ""
+						m.errMsg = ""
+						return m, nil
 					}
 				}
-			} else if m.focus == focusCatalog {
-				if item, ok := m.modelList.SelectedItem().(providerItem); ok && item.model.ID != "" && !item.locked {
-					m.form = newCreateForm(item.entryID, item.model, m.state.Meta, m.env)
-					m.mode = modeCreate
-					m.toast = ""
-					m.errMsg = ""
-					return m, nil
+			case "e":
+				if m.focus == focusConfigured {
+					if item, ok := m.llmList.SelectedItem().(llmItem); ok {
+						m.form = newEditForm(item.model, m.state.Meta, item.isDefault)
+						m.mode = modeCreate
+						m.toast = ""
+						m.errMsg = ""
+						return m, nil
+					}
+				}
+			case "d", "delete":
+				if m.focus == focusConfigured {
+					if item, ok := m.llmList.SelectedItem().(llmItem); ok {
+						target := item.model
+						m.deleteLLM = &target
+						m.mode = modeConfirmDelete
+						m.errMsg = ""
+						m.toast = ""
+						return m, nil
+					}
 				}
 			}
-		case "e":
-			if m.focus == focusConfigured {
-				if item, ok := m.llmList.SelectedItem().(llmItem); ok {
-					m.form = newEditForm(item.model, m.state.Meta, item.isDefault)
-					m.mode = modeCreate
-					m.toast = ""
-					m.errMsg = ""
-					return m, nil
-				}
-			}
-		case "d", "delete":
-			if m.focus == focusConfigured {
-				if item, ok := m.llmList.SelectedItem().(llmItem); ok {
-					target := item.model
-					m.deleteLLM = &target
-					m.mode = modeConfirmDelete
-					m.errMsg = ""
-					m.toast = ""
-					return m, nil
-				}
+		} else {
+			// When filtering, only allow these specific keys
+			switch msg.String() {
+			case "esc", "ctrl+c":
+				// Allow exit even when filtering
+				return m, tea.Quit
 			}
 		}
 	case aiStateMsg:
 		m.busy = false
 		m.busyMessage = ""
+		m.savingMessage = ""
 		m.mode = modeBrowse
 		m.form = nil
 		m.deleteLLM = nil
@@ -256,6 +278,10 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case aiErrMsg:
 		m.busy = false
 		m.busyMessage = ""
+		m.savingMessage = ""
+		if m.mode == modeSaving {
+			m.mode = modeBrowse
+		}
 		m.errMsg = msg.err.Error()
 	case aiTestMsg:
 		m.busy = false
@@ -309,7 +335,7 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 	// Only update lists if they're initialized (not in loading mode)
-	if m.mode != modeLoading {
+	if m.mode != modeLoading && m.mode != modeSaving {
 		if m.focus == focusConfigured {
 			listModel, cmd := m.llmList.Update(msg)
 			m.llmList = listModel
@@ -320,7 +346,7 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if m.busy || m.mode == modeLoading {
+	if m.busy || m.mode == modeLoading || m.mode == modeSaving {
 		sp, cmd := m.spinner.Update(msg)
 		m.spinner = sp
 		cmds = append(cmds, cmd)
@@ -356,12 +382,13 @@ func (m aiConfigModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.form.err = err.Error()
 			return m, nil
 		}
-		m.busy = true
-		if m.form.isEdit() {
-			m.busyMessage = "Updating model..."
-			return m, m.updateModelCmd(m.form.targetID(), payload)
+		m.mode = modeSaving
+		m.form = nil
+		if payload.ExistingID > 0 {
+			m.savingMessage = fmt.Sprintf("Updating %s...", payload.DisplayName)
+			return m, m.updateModelCmd(payload.ExistingID, payload)
 		}
-		m.busyMessage = "Creating model..."
+		m.savingMessage = fmt.Sprintf("Creating %s...", payload.DisplayName)
 		return m, m.createModelCmd(payload)
 	case "ctrl+t":
 		payload, err := m.form.payload()
@@ -380,9 +407,25 @@ func (m aiConfigModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toast = ""
 		return m, m.testModelCmd(payload)
 	case " ":
-		if field := m.form.currentField(); field != nil && field.Kind == fieldBool {
-			field.BoolValue = !field.BoolValue
-			return m, nil
+		if field := m.form.currentField(); field != nil {
+			if field.Kind == fieldBool {
+				field.BoolValue = !field.BoolValue
+				return m, nil
+			} else if field.Kind == fieldSelect {
+				// Cycle through select options
+				if len(field.SelectValues) > 0 {
+					currentIdx := 0
+					for i, opt := range field.SelectValues {
+						if opt == field.SelectValue {
+							currentIdx = i
+							break
+						}
+					}
+					nextIdx := (currentIdx + 1) % len(field.SelectValues)
+					field.SelectValue = field.SelectValues[nextIdx]
+				}
+				return m, nil
+			}
 		}
 	}
 	field := m.form.currentField()
@@ -483,6 +526,8 @@ func (m aiConfigModel) View() string {
 	switch m.mode {
 	case modeLoading:
 		return m.renderLoadingScreen()
+	case modeSaving:
+		return m.renderSavingModal()
 	case modeCreate:
 		if m.form != nil {
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.form.View(), lipgloss.WithWhitespaceChars("░"), lipgloss.WithWhitespaceForeground(lipgloss.Color("8")))
@@ -637,6 +682,50 @@ func (m aiConfigModel) renderDeleteModal() string {
 		Render(content)
 }
 
+func (m aiConfigModel) renderSavingModal() string {
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("212")).
+		Padding(0, 0, 1, 0)
+
+	spinnerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("212"))
+
+	messageStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("246")).
+		Padding(1, 0)
+
+	message := "Saving configuration..."
+	if m.savingMessage != "" {
+		message = m.savingMessage
+	}
+
+	lines := []string{
+		titleStyle.Render("💾 Saving Configuration"),
+		"",
+		spinnerStyle.Render(m.spinner.View() + " " + message),
+		"",
+		messageStyle.Render("This may take a moment..."),
+	}
+
+	content := strings.Join(lines, "\n")
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("212")).
+		Padding(2, 4).
+		Width(60)
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		box.Render(content),
+		lipgloss.WithWhitespaceChars("░"),
+		lipgloss.WithWhitespaceForeground(lipgloss.Color("8")),
+	)
+}
+
 type llmItem struct {
 	model     ai.LLMModel
 	isDefault bool
@@ -698,6 +787,7 @@ type fieldKind int
 const (
 	fieldInput fieldKind = iota
 	fieldBool
+	fieldSelect
 )
 
 type formMode int
@@ -708,12 +798,14 @@ const (
 )
 
 type formField struct {
-	Key        string
-	Label      string
-	Kind       fieldKind
-	Model      textinput.Model
-	BoolValue  bool
-	IsProvider bool
+	Key          string
+	Label        string
+	Kind         fieldKind
+	Model        textinput.Model
+	BoolValue    bool
+	SelectValue  string
+	SelectValues []string
+	IsProvider   bool
 }
 
 type createForm struct {
@@ -811,6 +903,30 @@ func newBoolField(key, label string, value bool) *formField {
 	return &formField{Key: key, Label: label, Kind: fieldBool, BoolValue: value}
 }
 
+func newSelectField(key, label, value string, options []string) *formField {
+	// Ensure value is in options, otherwise use first option
+	if value == "" && len(options) > 0 {
+		value = options[0]
+	}
+	found := false
+	for _, opt := range options {
+		if opt == value {
+			found = true
+			break
+		}
+	}
+	if !found && len(options) > 0 {
+		value = options[0]
+	}
+	return &formField{
+		Key:          key,
+		Label:        label,
+		Kind:         fieldSelect,
+		SelectValue:  value,
+		SelectValues: options,
+	}
+}
+
 func safeInt(val int, fallback int) string {
 	if val <= 0 {
 		val = fallback
@@ -868,6 +984,10 @@ func (f *createForm) View() string {
 				box = "[x]"
 			}
 			rendered = fmt.Sprintf("%s %s", box, field.Label)
+		case fieldSelect:
+			opts := strings.Join(field.SelectValues, " | ")
+			selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+			rendered = fmt.Sprintf("%s: %s\nOptions: %s", field.Label, selectedStyle.Render(field.SelectValue), opts)
 		}
 		if i == f.focusIndex {
 			rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Render(rendered)
@@ -875,7 +995,7 @@ func (f *createForm) View() string {
 		lines = append(lines, rendered, "")
 	}
 	lines = append(lines,
-		"[Space] toggle checkbox · Tab to move · Shift+Tab to go back",
+		"[Space] toggle/cycle · Tab to move · Shift+Tab to go back",
 		"Enter to save · Esc to cancel · Ctrl+T to test",
 	)
 	if f.testSuccess {
@@ -982,7 +1102,12 @@ func (f *createForm) providerParamsMap() map[string]interface{} {
 		case fieldBool:
 			params[field.Key] = field.BoolValue
 		case fieldInput:
-			params[field.Key] = strings.TrimSpace(field.Model.Value())
+			val := strings.TrimSpace(field.Model.Value())
+			if val != "" {
+				params[field.Key] = val
+			}
+		case fieldSelect:
+			params[field.Key] = field.SelectValue
 		}
 	}
 	if len(params) == 0 {
@@ -1049,20 +1174,24 @@ func buildProviderParamFields(provider string, meta ai.LLMMetadata, existing map
 				if val == "" {
 					val = defaultString(stringValue(def["default"]), existing, defaults, name)
 				}
-				field := newTextField(name, label, val, false)
+				var opts []string
 				if rawVals, ok := def["values"].([]interface{}); ok && len(rawVals) > 0 {
-					opts := make([]string, 0, len(rawVals))
 					for _, v := range rawVals {
 						if s := stringValue(v); s != "" {
 							opts = append(opts, s)
 						}
 					}
-					if len(opts) > 0 {
-						field.Model.Placeholder = fmt.Sprintf("options: %s", strings.Join(opts, "/"))
-					}
 				}
-				field.IsProvider = true
-				fields = append(fields, field)
+				if len(opts) > 0 {
+					field := newSelectField(name, label, val, opts)
+					field.IsProvider = true
+					fields = append(fields, field)
+				} else {
+					// Fallback to text field if no options
+					field := newTextField(name, label, val, false)
+					field.IsProvider = true
+					fields = append(fields, field)
+				}
 			default:
 				field := newTextField(name, label, defaultString("", existing, defaults, name), false)
 				field.IsProvider = true

@@ -138,18 +138,18 @@ func (c *openRouterConnector) fetch(ctx context.Context, client *http.Client, en
 			UpdatedAt:         now,
 			Raw:               obj,
 		}
-		
+
 		// Debug: Log free models
 		if strings.Contains(strings.ToLower(id), "minimax") || strings.Contains(strings.ToLower(name), "minimax") {
 			// This is a MiniMax model - let's see if it's being included
 		}
-		
+
 		models = append(models, model)
 	}
-	
+
 	// Could add logging here about skipped models if needed
 	_ = skippedCount
-	
+
 	return models, now, nil
 }
 
