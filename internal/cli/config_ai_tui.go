@@ -36,6 +36,7 @@ const (
 	modeCreate
 	modeConfirmDelete
 	modeSaving
+	modeTesting
 )
 
 type aiConfigOptions struct {
@@ -70,6 +71,9 @@ type aiConfigModel struct {
 	busyMessage     string
 	loadingProgress []string
 	savingMessage   string
+	testingMessage  string
+	testResult      string
+	testError       string
 	help            help.Model
 	llmList         list.Model
 	modelList       list.Model
@@ -186,6 +190,9 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeConfirmDelete && m.deleteLLM != nil {
 			return m.updateDeleteConfirm(msg)
 		}
+		if m.mode == modeTesting {
+			return m.updateTestingModal(msg)
+		}
 
 		// Check if we're currently filtering - if so, don't process single-key shortcuts
 		isFiltering := false
@@ -198,18 +205,30 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only process single-key shortcuts when not filtering
 		if !isFiltering {
 			switch msg.String() {
+			case "left", "h":
+				// Move to left pane (configured models)
+				m.focus = focusConfigured
+				return m, nil
+			case "right", "l":
+				// Move to right pane (catalog)
+				m.focus = focusCatalog
+				return m, nil
 			case "tab", "ctrl+i":
+				// Tab also works to cycle forward
 				if m.focus == focusConfigured {
 					m.focus = focusCatalog
 				} else {
 					m.focus = focusConfigured
 				}
+				return m, nil
 			case "shift+tab":
+				// Shift+Tab cycles backward
 				if m.focus == focusCatalog {
 					m.focus = focusConfigured
 				} else {
 					m.focus = focusCatalog
 				}
+				return m, nil
 			case "q", "esc", "ctrl+c":
 				return m, tea.Quit
 			case "r":
@@ -284,20 +303,12 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.errMsg = msg.err.Error()
 	case aiTestMsg:
-		m.busy = false
-		m.busyMessage = ""
 		if msg.err != nil {
-			if m.form != nil {
-				m.form.err = fmt.Sprintf("❌ Test failed: %s", msg.err.Error())
-			} else {
-				m.errMsg = fmt.Sprintf("❌ Test failed: %s", msg.err.Error())
-			}
+			m.testError = msg.err.Error()
+			m.testResult = "failed"
 		} else {
-			m.toast = "✅ LLM test succeeded! Connection verified."
-			if m.form != nil {
-				m.form.err = ""
-				m.form.testSuccess = true
-			}
+			m.testResult = "success"
+			m.testError = ""
 		}
 	case aiLoadingMsg:
 		m.loadingProgress = append(m.loadingProgress, msg.step)
@@ -334,8 +345,8 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmds []tea.Cmd
-	// Only update lists if they're initialized (not in loading mode)
-	if m.mode != modeLoading && m.mode != modeSaving {
+	// Only update lists if they're initialized (not in loading/saving/testing mode)
+	if m.mode != modeLoading && m.mode != modeSaving && m.mode != modeTesting {
 		if m.focus == focusConfigured {
 			listModel, cmd := m.llmList.Update(msg)
 			m.llmList = listModel
@@ -346,7 +357,7 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if m.busy || m.mode == modeLoading || m.mode == modeSaving {
+	if m.busy || m.mode == modeLoading || m.mode == modeSaving || m.mode == modeTesting {
 		sp, cmd := m.spinner.Update(msg)
 		m.spinner = sp
 		cmds = append(cmds, cmd)
@@ -400,12 +411,13 @@ func (m aiConfigModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.form.err = "Enter an API key to run a test"
 			return m, nil
 		}
-		m.busy = true
-		m.busyMessage = "Testing LLM connection..."
-		m.form.err = ""
-		m.form.testSuccess = false
-		m.toast = ""
-		return m, m.testModelCmd(payload)
+		// Switch to testing mode IMMEDIATELY - show modal right away
+		m.mode = modeTesting
+		m.testingMessage = fmt.Sprintf("Testing connection to %s...", payload.DisplayName)
+		m.testResult = ""
+		m.testError = ""
+		// Return both spinner tick and test command together
+		return m, tea.Batch(m.spinner.Tick, m.testModelCmd(payload))
 	case " ":
 		if field := m.form.currentField(); field != nil {
 			if field.Kind == fieldBool {
@@ -528,6 +540,8 @@ func (m aiConfigModel) View() string {
 		return m.renderLoadingScreen()
 	case modeSaving:
 		return m.renderSavingModal()
+	case modeTesting:
+		return m.renderTestingModal()
 	case modeCreate:
 		if m.form != nil {
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.form.View(), lipgloss.WithWhitespaceChars("░"), lipgloss.WithWhitespaceForeground(lipgloss.Color("8")))
@@ -724,6 +738,113 @@ func (m aiConfigModel) renderSavingModal() string {
 		lipgloss.WithWhitespaceChars("░"),
 		lipgloss.WithWhitespaceForeground(lipgloss.Color("8")),
 	)
+}
+
+func (m aiConfigModel) renderTestingModal() string {
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("212")).
+		Padding(0, 0, 1, 0)
+
+	spinnerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("212"))
+
+	successStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("42")).
+		Bold(true).
+		Padding(0, 2)
+
+	errorTitleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("203")).
+		Bold(true)
+
+	errorMsgStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("203")).
+		Background(lipgloss.Color("52")).
+		Padding(1, 2).
+		Width(60)
+
+	messageStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("246"))
+
+	lines := []string{
+		titleStyle.Render("🧪 Testing LLM Connection"),
+		"",
+	}
+
+	if m.testResult == "" {
+		// Still testing
+		message := "Testing connection..."
+		if m.testingMessage != "" {
+			message = m.testingMessage
+		}
+		lines = append(lines,
+			spinnerStyle.Render(m.spinner.View()+" "+message),
+			"",
+			messageStyle.Render("Sending test request to API..."),
+			"",
+			messageStyle.Render("This may take a few seconds..."),
+		)
+	} else if m.testResult == "success" {
+		// Success!
+		lines = append(lines,
+			"",
+			successStyle.Render("✅  TEST PASSED  ✅"),
+			"",
+			"",
+			messageStyle.Render("Connection verified successfully."),
+			messageStyle.Render("The API responded correctly."),
+			"",
+			"",
+			messageStyle.Render("Press Enter to continue"),
+		)
+	} else {
+		// Failed - make error VERY visible
+		lines = append(lines,
+			"",
+			errorTitleStyle.Render("❌  TEST FAILED  ❌"),
+			"",
+			"",
+			errorMsgStyle.Render(m.testError),
+			"",
+			"",
+			messageStyle.Render("Press Enter to return to form"),
+		)
+	}
+
+	content := strings.Join(lines, "\n")
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("212")).
+		Padding(2, 4).
+		Width(70)
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		box.Render(content),
+		lipgloss.WithWhitespaceChars("░"),
+		lipgloss.WithWhitespaceForeground(lipgloss.Color("8")),
+	)
+}
+
+func (m aiConfigModel) updateTestingModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Only allow returning to form once test is complete
+	if m.testResult != "" {
+		switch msg.String() {
+		case "enter", "esc":
+			// Return to form
+			m.mode = modeCreate
+			if m.testResult == "success" && m.form != nil {
+				m.form.testSuccess = true
+				m.form.err = ""
+			}
+			return m, nil
+		}
+	}
+	return m, nil
 }
 
 type llmItem struct {
