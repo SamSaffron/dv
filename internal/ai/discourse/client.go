@@ -1,6 +1,7 @@
 package discourse
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -106,20 +107,17 @@ func (c *Client) CreateModel(ctx context.Context, input CreateModelInput) (int64
 		"set_default": input.SetAsDefault,
 	}
 
+	// Generate a unique filename
 	tmpFile, err := os.CreateTemp("", "dv-llm-create-*.json")
 	if err != nil {
 		return 0, err
 	}
-	defer os.Remove(tmpFile.Name())
-	if err := json.NewEncoder(tmpFile).Encode(payload); err != nil {
-		tmpFile.Close()
-		return 0, err
-	}
 	tmpFile.Close()
+	os.Remove(tmpFile.Name()) // Remove temp file, we'll write directly to container
 
 	containerPath := fmt.Sprintf("/tmp/%s", filepath.Base(tmpFile.Name()))
-	if err := c.copyToContainer(tmpFile.Name(), containerPath); err != nil {
-		return 0, fmt.Errorf("copy payload: %w", err)
+	if err := c.writeJSONToContainer(payload, containerPath); err != nil {
+		return 0, fmt.Errorf("write payload: %w", err)
 	}
 	defer docker.ExecOutput(c.ContainerName, c.Workdir, []string{"bash", "-lc", "rm -f " + shellQuote(containerPath)})
 
@@ -252,20 +250,17 @@ func (c *Client) UpdateModel(ctx context.Context, id int64, input CreateModelInp
 		"set_default": input.SetAsDefault,
 	}
 
+	// Generate a unique filename
 	tmpFile, err := os.CreateTemp("", "dv-llm-update-*.json")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
-	if err := json.NewEncoder(tmpFile).Encode(payload); err != nil {
-		tmpFile.Close()
-		return err
-	}
 	tmpFile.Close()
+	os.Remove(tmpFile.Name()) // Remove temp file, we'll write directly to container
 
 	containerPath := fmt.Sprintf("/tmp/%s", filepath.Base(tmpFile.Name()))
-	if err := c.copyToContainer(tmpFile.Name(), containerPath); err != nil {
-		return fmt.Errorf("copy payload: %w", err)
+	if err := c.writeJSONToContainer(payload, containerPath); err != nil {
+		return fmt.Errorf("write payload: %w", err)
 	}
 	defer docker.ExecOutput(c.ContainerName, c.Workdir, []string{"bash", "-lc", "rm -f " + shellQuote(containerPath)})
 
@@ -288,20 +283,17 @@ func (c *Client) TestModel(ctx context.Context, input CreateModelInput) error {
 		return fmt.Errorf("API key is required to test an LLM")
 	}
 
+	// Generate a unique filename
 	tmpFile, err := os.CreateTemp("", "dv-llm-test-*.json")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
-	if err := json.NewEncoder(tmpFile).Encode(payload); err != nil {
-		tmpFile.Close()
-		return err
-	}
 	tmpFile.Close()
+	os.Remove(tmpFile.Name()) // Remove temp file, we'll write directly to container
 
 	containerPath := fmt.Sprintf("/tmp/%s", filepath.Base(tmpFile.Name()))
-	if err := c.copyToContainer(tmpFile.Name(), containerPath); err != nil {
-		return fmt.Errorf("copy payload: %w", err)
+	if err := c.writeJSONToContainer(payload, containerPath); err != nil {
+		return fmt.Errorf("write payload: %w", err)
 	}
 	defer docker.ExecOutput(c.ContainerName, c.Workdir, []string{"bash", "-lc", "rm -f " + shellQuote(containerPath)})
 
@@ -448,8 +440,18 @@ func buildLLMAttributes(input CreateModelInput, includeAPIKey bool) map[string]i
 	return attrs
 }
 
-func (c *Client) copyToContainer(src, dst string) error {
-	cmd := exec.Command("docker", "cp", src, fmt.Sprintf("%s:%s", c.ContainerName, dst))
+// writeJSONToContainer writes JSON data directly to a file in the container as the discourse user,
+// avoiding permission issues that occur with docker cp.
+func (c *Client) writeJSONToContainer(data interface{}, containerPath string) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshal JSON: %w", err)
+	}
+
+	// Write directly to container using docker exec with stdin, creating file as discourse user
+	args := []string{"exec", "-i", "--user", "discourse", "-w", "/", c.ContainerName, "bash", "-c", fmt.Sprintf("cat > %s", shellQuote(containerPath))}
+	cmd := exec.Command("docker", args...)
+	cmd.Stdin = bytes.NewReader(jsonData)
 	if c.Verbose {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
