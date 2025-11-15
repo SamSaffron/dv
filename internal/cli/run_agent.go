@@ -357,6 +357,11 @@ var agentRules = map[string]agentRule{
 		withPrompt:  func(p string) []string { return []string{"copilot", "-p", p} },
 		defaults:    []string{"--allow-all-tools", "--allow-all-paths"},
 	},
+	"kilocode": {
+		interactive: func() []string { return []string{"kilocode"} },
+		withPrompt:  func(p string) []string { return []string{"kilocode", "-p", p} },
+		defaults:    []string{"--dangerously-skip-permissions"},
+	},
 }
 
 // shellJoin quotes argv for safe execution in a single shell command.

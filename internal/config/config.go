@@ -72,7 +72,7 @@ func Default() Config {
 			"CURSOR_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
 			"CLAUDE_CODE_USE_BEDROCK", "DEEPSEEK_API_KEY", "GEMINI_API_KEY",
-			"AMP_API_KEY", "GH_TOKEN", "OPENROUTER_API_KEY",
+			"AMP_API_KEY", "GH_TOKEN", "OPENROUTER_API_KEY", "KILOCODE_API_KEY",
 		},
 		DiscourseRepo:       "https://github.com/discourse/discourse.git",
 		ExtractBranchPrefix: "agent-changes",
@@ -89,7 +89,8 @@ func Default() Config {
 		},
 		ContainerImages: map[string]string{},
 		CopyFiles: map[string]string{
-			"~/.codex/auth.json": "/home/discourse/.codex/auth.json",
+			"~/.codex/auth.json":      "/home/discourse/.codex/auth.json",
+			"~/.kilocode/config.json": "/home/discourse/.kilocode/config.json",
 		},
 	}
 }
@@ -138,7 +139,8 @@ func LoadOrCreate(configDir string) (Config, error) {
 	}
 	if cfg.CopyFiles == nil {
 		cfg.CopyFiles = map[string]string{
-			"~/.codex/auth.json": "/home/discourse/.codex/auth.json",
+			"~/.codex/auth.json":      "/home/discourse/.codex/auth.json",
+			"~/.kilocode/config.json": "/home/discourse/.kilocode/config.json",
 		}
 	}
 	if cfg.CustomWorkdirs == nil {
