@@ -359,8 +359,8 @@ var agentRules = map[string]agentRule{
 	},
 	"kilocode": {
 		interactive: func() []string { return []string{"kilocode"} },
-		withPrompt:  func(p string) []string { return []string{"kilocode", "-p", p} },
-		defaults:    []string{"--dangerously-skip-permissions"},
+		withPrompt:  func(p string) []string { return []string{"kilocode", "-a", p} },
+		defaults:    []string{},
 	},
 }
 

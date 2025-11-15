@@ -570,6 +570,7 @@ func (m aiConfigModel) renderStatusLine() string {
 		{"OpenRouter", []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY"}},
 		{"Groq", []string{"GROQ_API_KEY"}},
 		{"Gemini", []string{"GEMINI_API_KEY"}},
+		{"GitHub", []string{"GH_TOKEN"}},
 	} {
 		val := firstNonEmpty(m.env, entry.Keys...)
 		if val != "" {
@@ -1539,7 +1540,7 @@ func (m aiConfigModel) initLoadCmd() tea.Cmd {
 
 	return func() tea.Msg {
 		// Step 1: Enable AI features
-		if err := client.EnableFeatures(ctx, aiFeatureSettings); err != nil {
+		if err := client.EnableFeatures(ctx, aiFeatureSettings, env); err != nil {
 			return aiInitCompleteMsg{err: fmt.Errorf("enable features: %w", err)}
 		}
 

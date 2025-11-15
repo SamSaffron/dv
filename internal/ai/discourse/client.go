@@ -369,7 +369,7 @@ puts JSON.fast_generate({ success: true })
 `
 
 // EnableFeatures flips Discourse AI feature site settings to true for easier testing.
-func (c *Client) EnableFeatures(ctx context.Context, settings []string) error {
+func (c *Client) EnableFeatures(ctx context.Context, settings []string, env map[string]string) error {
 	if len(settings) == 0 {
 		return nil
 	}
@@ -386,7 +386,21 @@ func (c *Client) EnableFeatures(ctx context.Context, settings []string) error {
 	}
 	script := fmt.Sprintf(enableFeaturesTemplate, strings.Join(quoted, ", "))
 	_, err := c.runRails(script)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Set ai_bot_github_access_token from GH_TOKEN if available
+	if ghToken := strings.TrimSpace(env["GH_TOKEN"]); ghToken != "" {
+		setTokenScript := fmt.Sprintf(`
+SiteSetting.ai_bot_github_access_token = %q
+STDOUT.sync = true
+puts JSON.fast_generate({ github_token_set: true })
+`, ghToken)
+		_, err = c.runRails(setTokenScript)
+		return err
+	}
+	return nil
 }
 
 const enableFeaturesTemplate = `

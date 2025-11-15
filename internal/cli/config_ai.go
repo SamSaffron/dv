@@ -61,6 +61,9 @@ Other Providers:
   GEMINI_API_KEY          Google Gemini API key
   DEEPSEEK_API_KEY        DeepSeek API key
 
+GitHub:
+  GH_TOKEN                GitHub access token for AI bot GitHub integration
+
 AWS Bedrock:
   AWS_ACCESS_KEY_ID       AWS access key for Bedrock
   AWS_SECRET_ACCESS_KEY   AWS secret key for Bedrock
