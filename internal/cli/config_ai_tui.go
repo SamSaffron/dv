@@ -17,6 +17,7 @@ import (
 
 	"dv/internal/ai"
 	"dv/internal/ai/discourse"
+	"dv/internal/ai/providers"
 	"dv/internal/huh"
 )
 
@@ -30,7 +31,8 @@ const (
 type aiMode int
 
 const (
-	modeBrowse aiMode = iota
+	modeLoading aiMode = iota
+	modeBrowse
 	modeCreate
 	modeConfirmDelete
 )
@@ -43,66 +45,83 @@ type aiConfigOptions struct {
 	container    string
 	discourseDir string
 	ctx          context.Context
+	loadingState bool
+	cacheDir     string
 }
 
 type aiConfigModel struct {
-	ctx       context.Context
-	client    *discourse.Client
-	container string
-	workdir   string
-	env       map[string]string
-	focus     aiFocus
-	mode      aiMode
-	state     ai.LLMState
-	catalog   ai.ProviderCatalog
-	width     int
-	height    int
-	status    string
-	toast     string
-	errMsg    string
-	busy      bool
-	help      help.Model
-	llmList   list.Model
-	modelList list.Model
-	spinner   spinner.Model
-	form      *createForm
-	deleteLLM *ai.LLMModel
+	ctx             context.Context
+	client          *discourse.Client
+	container       string
+	workdir         string
+	env             map[string]string
+	cacheDir        string
+	focus           aiFocus
+	mode            aiMode
+	state           ai.LLMState
+	catalog         ai.ProviderCatalog
+	width           int
+	height          int
+	status          string
+	toast           string
+	errMsg          string
+	busy            bool
+	busyMessage     string
+	loadingProgress []string
+	help            help.Model
+	llmList         list.Model
+	modelList       list.Model
+	spinner         spinner.Model
+	form            *createForm
+	deleteLLM       *ai.LLMModel
 }
 
 func newAiConfigModel(opts aiConfigOptions) aiConfigModel {
-	llmItems := make([]list.Item, 0, len(opts.state.Models))
-	for _, m := range opts.state.Models {
-		llmItems = append(llmItems, llmItem{model: m, isDefault: m.ID == opts.state.DefaultID})
-	}
-	llmDelegate := list.NewDefaultDelegate()
-	llmList := list.New(llmItems, llmDelegate, 0, 0)
-	llmList.Title = "Configured Models"
-	llmList.SetShowStatusBar(false)
-	llmList.SetFilteringEnabled(true)
-	llmList.SetShowPagination(false)
+	var llmList, modelList list.Model
+	mode := modeBrowse
+	loadingProgress := []string{}
 
-	providerItems := catalogItems(opts.catalog)
-	providerDelegate := list.NewDefaultDelegate()
-	modelList := list.New(providerItems, providerDelegate, 0, 0)
-	modelList.Title = "Provider Catalog"
-	modelList.SetShowStatusBar(false)
-	modelList.SetShowPagination(false)
+	if opts.loadingState {
+		mode = modeLoading
+		loadingProgress = []string{"Starting up..."}
+	} else {
+		llmItems := make([]list.Item, 0, len(opts.state.Models))
+		for _, m := range opts.state.Models {
+			llmItems = append(llmItems, llmItem{model: m, isDefault: m.ID == opts.state.DefaultID})
+		}
+		llmDelegate := list.NewDefaultDelegate()
+		llmList = list.New(llmItems, llmDelegate, 0, 0)
+		llmList.Title = "Configured Models"
+		llmList.SetShowStatusBar(false)
+		llmList.SetFilteringEnabled(true)
+		llmList.SetShowPagination(false)
+
+		providerItems := catalogItems(opts.catalog)
+		providerDelegate := list.NewDefaultDelegate()
+		modelList = list.New(providerItems, providerDelegate, 0, 0)
+		modelList.Title = "Provider Catalog"
+		modelList.SetShowStatusBar(false)
+		modelList.SetShowPagination(false)
+	}
 
 	sp := spinner.New()
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
 
 	return aiConfigModel{
-		ctx:       opts.ctx,
-		client:    opts.client,
-		container: opts.container,
-		workdir:   opts.discourseDir,
-		env:       opts.env,
-		state:     opts.state,
-		catalog:   opts.catalog,
-		help:      help.New(),
-		llmList:   llmList,
-		modelList: modelList,
-		spinner:   sp,
+		ctx:             opts.ctx,
+		client:          opts.client,
+		container:       opts.container,
+		workdir:         opts.discourseDir,
+		env:             opts.env,
+		cacheDir:        opts.cacheDir,
+		state:           opts.state,
+		catalog:         opts.catalog,
+		mode:            mode,
+		loadingProgress: loadingProgress,
+		help:            help.New(),
+		llmList:         llmList,
+		modelList:       modelList,
+		spinner:         sp,
 	}
 }
 
@@ -120,7 +139,13 @@ func catalogItems(cat ai.ProviderCatalog) []list.Item {
 }
 
 func (m aiConfigModel) Init() tea.Cmd {
-	return nil
+	if m.mode == modeLoading {
+		return tea.Batch(
+			m.spinner.Tick,
+			m.initLoadCmd(),
+		)
+	}
+	return m.spinner.Tick
 }
 
 type aiStateMsg struct {
@@ -134,6 +159,16 @@ type aiErrMsg struct {
 
 type aiTestMsg struct {
 	err error
+}
+
+type aiLoadingMsg struct {
+	step string
+}
+
+type aiInitCompleteMsg struct {
+	state   ai.LLMState
+	catalog ai.ProviderCatalog
+	err     error
 }
 
 func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -166,12 +201,14 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "r":
 			m.busy = true
+			m.busyMessage = "Refreshing models..."
 			return m, m.fetchStateCmd("Refreshed models")
 		case "enter":
 			if m.focus == focusConfigured {
 				if item, ok := m.llmList.SelectedItem().(llmItem); ok {
 					if item.model.ID != m.state.DefaultID {
 						m.busy = true
+						m.busyMessage = "Setting default model..."
 						return m, m.setDefaultCmd(item.model.ID, item.model.DisplayName)
 					}
 				}
@@ -208,6 +245,7 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case aiStateMsg:
 		m.busy = false
+		m.busyMessage = ""
 		m.mode = modeBrowse
 		m.form = nil
 		m.deleteLLM = nil
@@ -217,34 +255,72 @@ func (m aiConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLists()
 	case aiErrMsg:
 		m.busy = false
+		m.busyMessage = ""
 		m.errMsg = msg.err.Error()
 	case aiTestMsg:
 		m.busy = false
+		m.busyMessage = ""
 		if msg.err != nil {
 			if m.form != nil {
-				m.form.err = msg.err.Error()
+				m.form.err = fmt.Sprintf("❌ Test failed: %s", msg.err.Error())
 			} else {
-				m.errMsg = msg.err.Error()
+				m.errMsg = fmt.Sprintf("❌ Test failed: %s", msg.err.Error())
 			}
 		} else {
-			m.toast = "LLM test succeeded"
+			m.toast = "✅ LLM test succeeded! Connection verified."
 			if m.form != nil {
 				m.form.err = ""
+				m.form.testSuccess = true
 			}
 		}
+	case aiLoadingMsg:
+		m.loadingProgress = append(m.loadingProgress, msg.step)
+	case aiInitCompleteMsg:
+		if msg.err != nil {
+			m.mode = modeBrowse
+			m.errMsg = fmt.Sprintf("Initialization error: %v", msg.err)
+			return m, nil
+		}
+		m.state = msg.state
+		m.catalog = msg.catalog
+		m.mode = modeBrowse
+
+		llmItems := make([]list.Item, 0, len(m.state.Models))
+		for _, model := range m.state.Models {
+			llmItems = append(llmItems, llmItem{model: model, isDefault: model.ID == m.state.DefaultID})
+		}
+		llmDelegate := list.NewDefaultDelegate()
+		m.llmList = list.New(llmItems, llmDelegate, 0, 0)
+		m.llmList.Title = "Configured Models"
+		m.llmList.SetShowStatusBar(false)
+		m.llmList.SetFilteringEnabled(true)
+		m.llmList.SetShowPagination(false)
+
+		providerItems := catalogItems(m.catalog)
+		providerDelegate := list.NewDefaultDelegate()
+		m.modelList = list.New(providerItems, providerDelegate, 0, 0)
+		m.modelList.Title = "Provider Catalog"
+		m.modelList.SetShowStatusBar(false)
+		m.modelList.SetShowPagination(false)
+
+		m.resize()
+		m.toast = "Ready!"
 	}
 
 	var cmds []tea.Cmd
-	if m.focus == focusConfigured {
-		listModel, cmd := m.llmList.Update(msg)
-		m.llmList = listModel
-		cmds = append(cmds, cmd)
-	} else if m.mode == modeBrowse {
-		modelList, cmd := m.modelList.Update(msg)
-		m.modelList = modelList
-		cmds = append(cmds, cmd)
+	// Only update lists if they're initialized (not in loading mode)
+	if m.mode != modeLoading {
+		if m.focus == focusConfigured {
+			listModel, cmd := m.llmList.Update(msg)
+			m.llmList = listModel
+			cmds = append(cmds, cmd)
+		} else if m.mode == modeBrowse {
+			modelList, cmd := m.modelList.Update(msg)
+			m.modelList = modelList
+			cmds = append(cmds, cmd)
+		}
 	}
-	if m.busy {
+	if m.busy || m.mode == modeLoading {
 		sp, cmd := m.spinner.Update(msg)
 		m.spinner = sp
 		cmds = append(cmds, cmd)
@@ -282,8 +358,10 @@ func (m aiConfigModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.busy = true
 		if m.form.isEdit() {
+			m.busyMessage = "Updating model..."
 			return m, m.updateModelCmd(m.form.targetID(), payload)
 		}
+		m.busyMessage = "Creating model..."
 		return m, m.createModelCmd(payload)
 	case "ctrl+t":
 		payload, err := m.form.payload()
@@ -296,6 +374,10 @@ func (m aiConfigModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.busy = true
+		m.busyMessage = "Testing LLM connection..."
+		m.form.err = ""
+		m.form.testSuccess = false
+		m.toast = ""
 		return m, m.testModelCmd(payload)
 	case " ":
 		if field := m.form.currentField(); field != nil && field.Kind == fieldBool {
@@ -323,6 +405,7 @@ func (m aiConfigModel) updateDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		m.mode = modeBrowse
 		m.deleteLLM = nil
 		m.busy = true
+		m.busyMessage = "Deleting model..."
 		return m, m.deleteModelCmd(target.ID, target.DisplayName)
 	case "n", "esc":
 		m.mode = modeBrowse
@@ -334,6 +417,10 @@ func (m aiConfigModel) updateDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 
 func (m *aiConfigModel) resize() {
 	if m.width == 0 || m.height == 0 {
+		return
+	}
+	// Skip resize if we're in loading mode (lists not initialized yet)
+	if m.mode == modeLoading {
 		return
 	}
 	bodyHeight := max(10, m.height-8)
@@ -381,7 +468,11 @@ func (m aiConfigModel) View() string {
 	}
 	busy := ""
 	if m.busy {
-		busy = m.spinner.View() + " Working..."
+		busyMsg := "Working..."
+		if m.busyMessage != "" {
+			busyMsg = m.busyMessage
+		}
+		busy = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Render(m.spinner.View() + " " + busyMsg)
 	}
 
 	view := fmt.Sprintf("%s\n%s\n\n%s\n%s\n%s", status, body, detail, toast, errLine)
@@ -390,6 +481,8 @@ func (m aiConfigModel) View() string {
 	}
 
 	switch m.mode {
+	case modeLoading:
+		return m.renderLoadingScreen()
 	case modeCreate:
 		if m.form != nil {
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.form.View(), lipgloss.WithWhitespaceChars("░"), lipgloss.WithWhitespaceForeground(lipgloss.Color("8")))
@@ -414,8 +507,8 @@ func (m aiConfigModel) renderStatusLine() string {
 		Keys  []string
 	}{
 		{"OpenAI", []string{"OPENAI_API_KEY"}},
-		{"OpenRouter", []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY"}},
 		{"Anthropic", []string{"ANTHROPIC_API_KEY"}},
+		{"OpenRouter", []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY"}},
 		{"Groq", []string{"GROQ_API_KEY"}},
 		{"Gemini", []string{"GEMINI_API_KEY"}},
 	} {
@@ -586,6 +679,10 @@ func (i providerItem) Description() string {
 		}
 		return "No credentials detected"
 	}
+	// Handle free models
+	if i.model.InputCost == 0 && i.model.OutputCost == 0 {
+		return fmt.Sprintf("%s · ctx %d · FREE", i.model.Provider, i.model.ContextTokens)
+	}
 	return fmt.Sprintf("%s · ctx %d · $%.4f/$%.4f", i.model.Provider, i.model.ContextTokens, i.model.InputCost, i.model.OutputCost)
 }
 
@@ -620,12 +717,13 @@ type formField struct {
 }
 
 type createForm struct {
-	entryID    string
-	fields     []*formField
-	focusIndex int
-	err        string
-	mode       formMode
-	editingID  int64
+	entryID     string
+	fields      []*formField
+	focusIndex  int
+	err         string
+	mode        formMode
+	editingID   int64
+	testSuccess bool
 }
 
 func newCreateForm(entryID string, model ai.ProviderModel, meta ai.LLMMetadata, env map[string]string) *createForm {
@@ -780,6 +878,9 @@ func (f *createForm) View() string {
 		"[Space] toggle checkbox · Tab to move · Shift+Tab to go back",
 		"Enter to save · Esc to cancel · Ctrl+T to test",
 	)
+	if f.testSuccess {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true).Render("✅ Test passed! You can now save the configuration."))
+	}
 	if f.err != "" {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(f.err))
 	}
@@ -1099,6 +1200,8 @@ func providerKeyHints(entryID string) []string {
 		return []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY"}
 	case "openai":
 		return []string{"OPENAI_API_KEY"}
+	case "anthropic":
+		return []string{"ANTHROPIC_API_KEY"}
 	default:
 		return nil
 	}
@@ -1134,4 +1237,81 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (m aiConfigModel) renderLoadingScreen() string {
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("212")).
+		Padding(1, 0)
+
+	spinnerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("212"))
+
+	progressStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("246")).
+		PaddingLeft(2)
+
+	lines := []string{
+		titleStyle.Render("🚀 Discourse AI Configuration"),
+		"",
+		spinnerStyle.Render(m.spinner.View() + " Initializing..."),
+		"",
+	}
+
+	if len(m.loadingProgress) > 0 {
+		for _, step := range m.loadingProgress {
+			lines = append(lines, progressStyle.Render("✓ "+step))
+		}
+	}
+
+	content := strings.Join(lines, "\n")
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("212")).
+		Padding(2, 4).
+		Width(60)
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		box.Render(content),
+	)
+}
+
+func (m aiConfigModel) initLoadCmd() tea.Cmd {
+	client := m.client
+	ctx := m.ctx
+	env := m.env
+	cacheDir := m.cacheDir
+
+	return func() tea.Msg {
+		// Step 1: Enable AI features
+		if err := client.EnableFeatures(ctx, aiFeatureSettings); err != nil {
+			return aiInitCompleteMsg{err: fmt.Errorf("enable features: %w", err)}
+		}
+
+		// Step 2: Fetch state from Discourse
+		state, err := client.FetchState(ctx)
+		if err != nil {
+			return aiInitCompleteMsg{err: fmt.Errorf("fetch state: %w", err)}
+		}
+
+		// Step 3: Load provider catalog
+		catalog, err := providers.LoadCatalog(ctx, providers.CatalogOptions{
+			CacheDir: cacheDir,
+			Env:      env,
+		})
+		if err != nil {
+			// Non-fatal, just log the warning
+			catalog = ai.ProviderCatalog{}
+		}
+
+		return aiInitCompleteMsg{
+			state:   state,
+			catalog: catalog,
+		}
+	}
 }

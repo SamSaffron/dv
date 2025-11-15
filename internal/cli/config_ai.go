@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"dv/internal/ai/discourse"
-	"dv/internal/ai/providers"
 	"dv/internal/config"
 	"dv/internal/docker"
 	"dv/internal/xdg"
@@ -88,22 +86,6 @@ var configAICmd = &cobra.Command{
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		client := discourse.NewClient(containerName, discourseRoot, verbose)
 
-		if err := client.EnableFeatures(cmd.Context(), aiFeatureSettings); err != nil {
-			return fmt.Errorf("enable Discourse AI features: %w", err)
-		}
-
-		state, err := client.FetchState(cmd.Context())
-		if err != nil {
-			if verbose {
-				var decErr discourse.DecodeError
-				if errors.As(err, &decErr) && strings.TrimSpace(decErr.Payload) != "" {
-					fmt.Fprintln(cmd.ErrOrStderr(), "Raw payload from Discourse:")
-					fmt.Fprintln(cmd.ErrOrStderr(), truncate(decErr.Payload, 4000))
-				}
-			}
-			return err
-		}
-
 		cacheDir, err := xdg.CacheDir()
 		if err != nil {
 			return err
@@ -116,25 +98,15 @@ var configAICmd = &cobra.Command{
 				env[parts[0]] = parts[1]
 			}
 		}
-		catalog, err := providers.LoadCatalog(cmd.Context(), providers.CatalogOptions{
-			CacheDir: providerCache,
-			Env:      env,
-		})
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: provider catalog unavailable (%v)\n", err)
-			if verbose {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Provider catalog details: %+v\n", err)
-			}
-		}
 
 		model := newAiConfigModel(aiConfigOptions{
-			state:        state,
-			catalog:      catalog,
 			client:       client,
 			env:          env,
 			container:    containerName,
 			discourseDir: discourseRoot,
 			ctx:          cmd.Context(),
+			loadingState: true,
+			cacheDir:     providerCache,
 		})
 
 		program := tea.NewProgram(model, tea.WithContext(cmd.Context()))

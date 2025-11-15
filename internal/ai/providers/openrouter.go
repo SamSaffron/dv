@@ -59,15 +59,22 @@ func (c *openRouterConnector) fetch(ctx context.Context, client *http.Client, en
 
 	now := time.Now()
 	models := make([]ai.ProviderModel, 0, len(root.Data))
+	skippedCount := 0
 	for _, raw := range root.Data {
 		var obj map[string]interface{}
 		if err := json.Unmarshal(raw, &obj); err != nil {
+			skippedCount++
 			continue
 		}
 		id := stringValue(obj["id"])
 		name := stringValue(obj["name"])
-		if id == "" || name == "" {
+		if id == "" {
+			skippedCount++
 			continue
+		}
+		// Use ID as display name if name is missing
+		if name == "" {
+			name = id
 		}
 		desc := stringValue(obj["description"])
 		contextTokens := int(floatValue(obj["context_length"]))
@@ -87,10 +94,10 @@ func (c *openRouterConnector) fetch(ctx context.Context, client *http.Client, en
 				cachedCost = priceFromValue(pricing["cached"])
 			}
 		}
-		// API returns USD per 1K tokens; convert to per 1M for Discourse UI.
-		inputCost *= 1000
-		outputCost *= 1000
-		cachedCost *= 1000
+		// API returns USD per token; convert to per 1M for Discourse UI.
+		inputCost *= 1_000_000
+		outputCost *= 1_000_000
+		cachedCost *= 1_000_000
 
 		var tags []string
 		if rawTags, ok := obj["tags"].([]interface{}); ok {
@@ -113,7 +120,7 @@ func (c *openRouterConnector) fetch(ctx context.Context, client *http.Client, en
 			family = stringValue(top["provider"])
 		}
 
-		models = append(models, ai.ProviderModel{
+		model := ai.ProviderModel{
 			ID:                id,
 			DisplayName:       name,
 			Provider:          "open_router",
@@ -130,8 +137,19 @@ func (c *openRouterConnector) fetch(ctx context.Context, client *http.Client, en
 			Tags:              tags,
 			UpdatedAt:         now,
 			Raw:               obj,
-		})
+		}
+		
+		// Debug: Log free models
+		if strings.Contains(strings.ToLower(id), "minimax") || strings.Contains(strings.ToLower(name), "minimax") {
+			// This is a MiniMax model - let's see if it's being included
+		}
+		
+		models = append(models, model)
 	}
+	
+	// Could add logging here about skipped models if needed
+	_ = skippedCount
+	
 	return models, now, nil
 }
 

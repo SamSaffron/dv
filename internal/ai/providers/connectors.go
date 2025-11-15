@@ -22,6 +22,7 @@ type connector interface {
 var builtinConnectors = []connector{
 	&openRouterConnector{},
 	&openAIConnector{},
+	&anthropicConnector{},
 }
 
 func envValue(env map[string]string, key string) string {

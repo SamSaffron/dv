@@ -13,31 +13,87 @@ import (
 )
 
 type openAIHint struct {
-	ContextTokens int
-	InputCost     float64
-	OutputCost    float64
+	ContextTokens   int
+	InputCost       float64
+	CachedInputCost float64
+	OutputCost      float64
 }
 
+// OpenAI pricing as of 2025-11 from https://platform.openai.com/docs/pricing
+// Prices are in USD per 1M tokens
 var openAIModelHints = map[string]openAIHint{
-	"gpt-4o":                 {ContextTokens: 128000, InputCost: 5, OutputCost: 15},
-	"gpt-4o-mini":            {ContextTokens: 128000, InputCost: 0.15, OutputCost: 0.60},
-	"gpt-4.1-mini":           {ContextTokens: 200000, InputCost: 1.5, OutputCost: 6},
-	"gpt-4.1":                {ContextTokens: 200000, InputCost: 10, OutputCost: 30},
-	"gpt-4.1-preview":        {ContextTokens: 128000, InputCost: 5, OutputCost: 15},
-	"gpt-4o-realtime":        {ContextTokens: 128000, InputCost: 5, OutputCost: 15},
-	"o1":                     {ContextTokens: 200000, InputCost: 15, OutputCost: 60},
-	"o1-mini":                {ContextTokens: 200000, InputCost: 3, OutputCost: 12},
-	"o1-preview":             {ContextTokens: 200000, InputCost: 15, OutputCost: 60},
-	"o3-mini":                {ContextTokens: 200000, InputCost: 1.1, OutputCost: 4.4},
-	"gpt-4-turbo":            {ContextTokens: 128000, InputCost: 10, OutputCost: 30},
-	"gpt-4.0":                {ContextTokens: 8192, InputCost: 30, OutputCost: 60},
-	"gpt-4.0-mini":           {ContextTokens: 32768, InputCost: 0.3, OutputCost: 1.2},
-	"gpt-3.5-turbo":          {ContextTokens: 16385, InputCost: 0.6, OutputCost: 2.0},
-	"gpt-3.5-turbo-16k":      {ContextTokens: 16385, InputCost: 1.2, OutputCost: 4.0},
-	"text-embedding-3":       {ContextTokens: 8192, InputCost: 0.02, OutputCost: 0},
+	// GPT-5 models
+	"gpt-5.1":            {ContextTokens: 200000, InputCost: 1.25, CachedInputCost: 0.125, OutputCost: 10.0},
+	"gpt-5":              {ContextTokens: 200000, InputCost: 1.25, CachedInputCost: 0.125, OutputCost: 10.0},
+	"gpt-5-mini":         {ContextTokens: 200000, InputCost: 0.25, CachedInputCost: 0.025, OutputCost: 2.0},
+	"gpt-5-nano":         {ContextTokens: 200000, InputCost: 0.05, CachedInputCost: 0.005, OutputCost: 0.40},
+	"gpt-5.1-chat":       {ContextTokens: 200000, InputCost: 1.25, CachedInputCost: 0.125, OutputCost: 10.0},
+	"gpt-5-chat":         {ContextTokens: 200000, InputCost: 1.25, CachedInputCost: 0.125, OutputCost: 10.0},
+	"gpt-5.1-codex":      {ContextTokens: 200000, InputCost: 1.25, CachedInputCost: 0.125, OutputCost: 10.0},
+	"gpt-5-codex":        {ContextTokens: 200000, InputCost: 1.25, CachedInputCost: 0.125, OutputCost: 10.0},
+	"gpt-5-pro":          {ContextTokens: 200000, InputCost: 15.0, OutputCost: 120.0},
+	"gpt-5.1-codex-mini": {ContextTokens: 200000, InputCost: 0.25, CachedInputCost: 0.025, OutputCost: 2.0},
+	"gpt-5-search-api":   {ContextTokens: 200000, InputCost: 1.25, CachedInputCost: 0.125, OutputCost: 10.0},
+
+	// GPT-4.1 models
+	"gpt-4.1":      {ContextTokens: 200000, InputCost: 2.0, CachedInputCost: 0.50, OutputCost: 8.0},
+	"gpt-4.1-mini": {ContextTokens: 200000, InputCost: 0.40, CachedInputCost: 0.10, OutputCost: 1.60},
+	"gpt-4.1-nano": {ContextTokens: 200000, InputCost: 0.10, CachedInputCost: 0.025, OutputCost: 0.40},
+
+	// GPT-4o models
+	"gpt-4o":                       {ContextTokens: 128000, InputCost: 2.50, CachedInputCost: 1.25, OutputCost: 10.0},
+	"gpt-4o-2024-05-13":            {ContextTokens: 128000, InputCost: 5.0, OutputCost: 15.0},
+	"gpt-4o-mini":                  {ContextTokens: 128000, InputCost: 0.15, CachedInputCost: 0.075, OutputCost: 0.60},
+	"gpt-4o-mini-search-preview":   {ContextTokens: 128000, InputCost: 0.15, OutputCost: 0.60},
+	"gpt-4o-search-preview":        {ContextTokens: 128000, InputCost: 2.50, OutputCost: 10.0},
+	"gpt-4o-audio-preview":         {ContextTokens: 128000, InputCost: 2.50, OutputCost: 10.0},
+	"gpt-4o-mini-audio-preview":    {ContextTokens: 128000, InputCost: 0.15, OutputCost: 0.60},
+	"gpt-4o-realtime-preview":      {ContextTokens: 128000, InputCost: 5.0, CachedInputCost: 2.50, OutputCost: 20.0},
+	"gpt-4o-mini-realtime-preview": {ContextTokens: 128000, InputCost: 0.60, CachedInputCost: 0.30, OutputCost: 2.40},
+
+	// Realtime models
+	"gpt-realtime":      {ContextTokens: 128000, InputCost: 4.0, CachedInputCost: 0.40, OutputCost: 16.0},
+	"gpt-realtime-mini": {ContextTokens: 128000, InputCost: 0.60, CachedInputCost: 0.06, OutputCost: 2.40},
+
+	// Audio models
+	"gpt-audio":      {ContextTokens: 128000, InputCost: 2.50, OutputCost: 10.0},
+	"gpt-audio-mini": {ContextTokens: 128000, InputCost: 0.60, OutputCost: 2.40},
+
+	// o-series reasoning models
+	"o1":                    {ContextTokens: 200000, InputCost: 15.0, CachedInputCost: 7.50, OutputCost: 60.0},
+	"o1-mini":               {ContextTokens: 128000, InputCost: 1.10, CachedInputCost: 0.55, OutputCost: 4.40},
+	"o1-pro":                {ContextTokens: 200000, InputCost: 150.0, OutputCost: 600.0},
+	"o3":                    {ContextTokens: 200000, InputCost: 2.0, CachedInputCost: 0.50, OutputCost: 8.0},
+	"o3-mini":               {ContextTokens: 200000, InputCost: 1.10, CachedInputCost: 0.55, OutputCost: 4.40},
+	"o3-pro":                {ContextTokens: 200000, InputCost: 20.0, OutputCost: 80.0},
+	"o3-deep-research":      {ContextTokens: 200000, InputCost: 10.0, CachedInputCost: 2.50, OutputCost: 40.0},
+	"o4-mini":               {ContextTokens: 200000, InputCost: 1.10, CachedInputCost: 0.275, OutputCost: 4.40},
+	"o4-mini-deep-research": {ContextTokens: 200000, InputCost: 2.0, CachedInputCost: 0.50, OutputCost: 8.0},
+
+	// Other models
+	"computer-use-preview": {ContextTokens: 128000, InputCost: 3.0, OutputCost: 12.0},
+	"codex-mini":           {ContextTokens: 200000, InputCost: 1.50, CachedInputCost: 0.375, OutputCost: 6.0},
+
+	// Image generation models
+	"gpt-image-1":      {ContextTokens: 0, InputCost: 5.0, CachedInputCost: 1.25, OutputCost: 0},
+	"gpt-image-1-mini": {ContextTokens: 0, InputCost: 2.0, CachedInputCost: 0.20, OutputCost: 0},
+
+	// Legacy GPT-4 models
+	"gpt-4-turbo": {ContextTokens: 128000, InputCost: 10.0, CachedInputCost: 5.0, OutputCost: 30.0},
+	"gpt-4":       {ContextTokens: 8192, InputCost: 30.0, OutputCost: 60.0},
+
+	// GPT-3.5 Turbo (legacy)
+	"gpt-3.5-turbo": {ContextTokens: 16385, InputCost: 0.50, OutputCost: 1.50},
+
+	// Embeddings
 	"text-embedding-3-large": {ContextTokens: 8192, InputCost: 0.13, OutputCost: 0},
 	"text-embedding-3-small": {ContextTokens: 8192, InputCost: 0.02, OutputCost: 0},
-	"whisper-1":              {ContextTokens: 0, InputCost: 18, OutputCost: 0}, // $0.018/min => $18 per 1M tokens approx.
+	"text-embedding-ada":     {ContextTokens: 8192, InputCost: 0.10, OutputCost: 0},
+
+	// Audio (legacy)
+	"whisper-1": {ContextTokens: 0, InputCost: 6.0, OutputCost: 0},  // $0.006/minute
+	"tts-1":     {ContextTokens: 0, InputCost: 15.0, OutputCost: 0}, // $0.015 per 1K chars
+	"tts-1-hd":  {ContextTokens: 0, InputCost: 30.0, OutputCost: 0}, // $0.030 per 1K chars
 }
 
 type openAIConnector struct{}
@@ -131,7 +187,7 @@ func (c *openAIConnector) fetch(ctx context.Context, client *http.Client, env ma
 			Tokenizer:         "DiscourseAi::Tokenizer::OpenAiTokenizer",
 			ContextTokens:     hint.ContextTokens,
 			InputCost:         hint.InputCost,
-			CachedInputCost:   0,
+			CachedInputCost:   hint.CachedInputCost,
 			OutputCost:        hint.OutputCost,
 			SupportsVision:    strings.Contains(id, "vision") || strings.Contains(id, "omni"),
 			SupportsReasoning: strings.HasPrefix(id, "o1") || strings.HasPrefix(id, "o3"),
@@ -150,12 +206,14 @@ func isInterestingOpenAIModel(id string) bool {
 	case strings.HasPrefix(lower, "gpt"),
 		strings.HasPrefix(lower, "o1"),
 		strings.HasPrefix(lower, "o3"),
+		strings.HasPrefix(lower, "o4"),
+		strings.HasPrefix(lower, "chatgpt"),
 		strings.Contains(lower, "omni"),
-		strings.Contains(lower, "gpt-4"),
-		strings.Contains(lower, "gpt-5"),
+		strings.Contains(lower, "realtime"),
+		strings.Contains(lower, "audio"),
+		strings.Contains(lower, "codex"),
+		strings.Contains(lower, "computer-use"),
 		strings.Contains(lower, "text-embedding"),
-		strings.Contains(lower, "text-embedding-3"),
-		strings.Contains(lower, "text-embedding-ada"),
 		strings.Contains(lower, "whisper"),
 		strings.HasPrefix(lower, "tts"):
 		return true
