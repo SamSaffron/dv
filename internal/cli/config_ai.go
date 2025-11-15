@@ -36,6 +36,38 @@ var aiFeatureSettings = []string{
 var configAICmd = &cobra.Command{
 	Use:   "ai",
 	Short: "Configure Discourse AI LLMs via a delightful TUI",
+	Long: `Configure Discourse AI LLMs via a delightful TUI.
+
+This command launches an interactive interface to configure AI language models
+for your Discourse instance. You can add, edit, test, and manage LLM providers
+including OpenAI, Anthropic, OpenRouter, and more.
+
+ENVIRONMENT VARIABLES
+
+The following environment variables are automatically used if set:
+
+OpenAI:
+  OPENAI_API_KEY          OpenAI API key for GPT models
+
+Anthropic:
+  ANTHROPIC_API_KEY       Anthropic API key for Claude models
+
+OpenRouter:
+  OPENROUTER_API_KEY      OpenRouter API key
+  OPENROUTER_KEY          Alternative OpenRouter API key variable
+
+Other Providers:
+  GROQ_API_KEY            Groq API key for fast inference models
+  GEMINI_API_KEY          Google Gemini API key
+  DEEPSEEK_API_KEY        DeepSeek API key
+
+AWS Bedrock:
+  AWS_ACCESS_KEY_ID       AWS access key for Bedrock
+  AWS_SECRET_ACCESS_KEY   AWS secret key for Bedrock
+
+These environment variables are automatically populated in API key fields when
+configuring new models, and are passed to the container when testing connections.
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
