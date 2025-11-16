@@ -196,12 +196,8 @@ into Discourse once ready. The container workdir is updated so 'dv enter' opens 
 			return err
 		}
 
-		if err := docker.CopyToContainer(ctx.containerName, root, workspacePath); err != nil {
+		if err := docker.CopyToContainerWithOwnership(ctx.containerName, root, workspacePath, true); err != nil {
 			return err
-		}
-		chownCmd := fmt.Sprintf("chown -R discourse:discourse %s", shellQuote(workspacePath))
-		if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"bash", "-lc", chownCmd}); err != nil {
-			return fmt.Errorf("failed to set ownership on %s: %w", workspacePath, err)
 		}
 
 		if err := setContainerWorkdir(ctx.cfg, ctx.configDir, ctx.containerName, workspacePath); err != nil {

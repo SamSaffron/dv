@@ -84,11 +84,10 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 		}
 		dstDir := filepath.Dir(containerDst)
 		_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
-		if err := docker.CopyToContainer(containerName, hostPath, containerDst); err != nil {
+		if err := docker.CopyToContainerWithOwnership(containerName, hostPath, containerDst, false); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hostPath, containerDst, err)
 			continue
 		}
-		_, _ = docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", containerDst})
 	}
 }
 

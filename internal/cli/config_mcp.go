@@ -257,10 +257,9 @@ func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, en
 		return fmt.Errorf("failed to write temporary MCP profile: %w", err)
 	}
 
-	if err := docker.CopyToContainer(containerName, tmpProfile, profilePath); err != nil {
+	if err := docker.CopyToContainerWithOwnership(containerName, tmpProfile, profilePath, false); err != nil {
 		return fmt.Errorf("failed to copy MCP profile into container: %w", err)
 	}
-	_, _ = docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", profilePath})
 
 	mcpConfig := mcpConfiguration{
 		name:            "discourse",
@@ -345,10 +344,9 @@ func configureMCP(cmd *cobra.Command, containerName, workdir string, envs []stri
 		return err
 	}
 
-	if err := docker.CopyToContainer(containerName, hostCfg, codexConfigPath); err != nil {
+	if err := docker.CopyToContainerWithOwnership(containerName, hostCfg, codexConfigPath, false); err != nil {
 		return fmt.Errorf("failed to copy Codex config into container: %w", err)
 	}
-	_, _ = docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", codexConfigPath})
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%s MCP configuration complete.\n", strings.Title(mcpConfig.name))
 	return nil

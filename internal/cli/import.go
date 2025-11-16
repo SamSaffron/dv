@@ -187,16 +187,11 @@ var importCmd = &cobra.Command{
 		// Copy patches directory to container under /tmp
 		// Resulting container path will be /tmp/<basename(tmpDir)>/patches
 		tmpBase := filepath.Base(tmpDir)
-		if err := docker.CopyToContainer(name, tmpDir, "/tmp"); err != nil {
+		if err := docker.CopyToContainerWithOwnership(name, tmpDir, "/tmp", true); err != nil {
 			return fmt.Errorf("failed to copy patches to container: %v", err)
 		}
 		inContainerTmp := filepath.Join("/tmp", tmpBase)
 		inContainerPatches := filepath.Join(inContainerTmp, "patches")
-
-		// Set proper ownership and permissions for the patches directory
-		if _, err := docker.ExecAsRoot(name, "/", []string{"chown", "-R", "discourse:discourse", inContainerTmp}); err != nil {
-			return fmt.Errorf("failed to set ownership on patches directory: %v", err)
-		}
 		if _, err := docker.ExecAsRoot(name, "/", []string{"chmod", "-R", "755", inContainerTmp}); err != nil {
 			return fmt.Errorf("failed to set permissions on patches directory: %v", err)
 		}

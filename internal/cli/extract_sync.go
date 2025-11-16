@@ -680,14 +680,11 @@ func (s *extractSync) copyHostToContainer(rel string) error {
 	if err := s.ensureContainerDir(path.Dir(rel)); err != nil {
 		return err
 	}
-	if err := docker.CopyToContainer(s.containerName, hostPath, destDir); err != nil {
+	if err := docker.CopyToContainerWithOwnership(s.containerName, hostPath, destDir, false); err != nil {
 		return err
 	}
-	// Ensure the discourse user retains ownership and write permissions
+	// Ensure the discourse user retains write permissions
 	mode := fmt.Sprintf("%04o", info.Mode().Perm())
-	if _, err := docker.ExecAsRoot(s.containerName, s.workdir, []string{"chown", "discourse:discourse", rel}); err != nil {
-		return fmt.Errorf("container chown %s: %w", rel, err)
-	}
 	if _, err := docker.ExecAsRoot(s.containerName, s.workdir, []string{"chmod", mode, rel}); err != nil {
 		return fmt.Errorf("container chmod %s: %w", rel, err)
 	}

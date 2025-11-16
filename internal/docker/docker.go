@@ -264,6 +264,26 @@ func CopyToContainer(name, srcOnHost, dstInContainer string) error {
 	return cmd.Run()
 }
 
+// CopyToContainerWithOwnership copies a file or directory into a container and
+// sets its ownership to discourse:discourse. If recursive is true, ownership is
+// set recursively (useful for directories).
+func CopyToContainerWithOwnership(name, srcOnHost, dstInContainer string, recursive bool) error {
+	if err := CopyToContainer(name, srcOnHost, dstInContainer); err != nil {
+		return err
+	}
+
+	chownArgs := []string{"chown"}
+	if recursive {
+		chownArgs = append(chownArgs, "-R")
+	}
+	chownArgs = append(chownArgs, "discourse:discourse", dstInContainer)
+
+	if _, err := ExecAsRoot(name, "/", chownArgs); err != nil {
+		return fmt.Errorf("failed to set ownership on %s: %w", dstInContainer, err)
+	}
+	return nil
+}
+
 func shellEscape(s string) string {
 	var b bytes.Buffer
 	for _, r := range s {

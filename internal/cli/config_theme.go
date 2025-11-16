@@ -423,12 +423,8 @@ func scaffoldThemeIntoContainer(ctx themeCommandContext, displayName string, isC
 		return err
 	}
 
-	if err := docker.CopyToContainer(ctx.containerName, root, themePath); err != nil {
+	if err := docker.CopyToContainerWithOwnership(ctx.containerName, root, themePath, true); err != nil {
 		return err
-	}
-	chownCmd := fmt.Sprintf("chown -R discourse:discourse %s", shellQuote(themePath))
-	if _, err := docker.ExecAsRoot(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", chownCmd}); err != nil {
-		return fmt.Errorf("failed to set ownership on %s: %w", themePath, err)
 	}
 	return nil
 }
@@ -464,12 +460,8 @@ func writeAgentFileToContainer(ctx themeCommandContext, themePath, displayName, 
 	}
 
 	agentPath := path.Join(themePath, "AGENTS.md")
-	if err := docker.CopyToContainer(ctx.containerName, tmpFile.Name(), agentPath); err != nil {
+	if err := docker.CopyToContainerWithOwnership(ctx.containerName, tmpFile.Name(), agentPath, false); err != nil {
 		return err
-	}
-	chownCmd := fmt.Sprintf("chown discourse:discourse %s", shellQuote(agentPath))
-	if _, err := docker.ExecAsRoot(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", chownCmd}); err != nil {
-		return fmt.Errorf("failed to set ownership on %s: %w", agentPath, err)
 	}
 	return nil
 }
@@ -631,7 +623,7 @@ func ensureThemeWatcherScript(cmd *cobra.Command, ctx themeCommandContext) error
 		return err
 	}
 	ctx.verboseLog(cmd, "Copying watcher script into container")
-	if err := docker.CopyToContainer(ctx.containerName, tmpFile.Name(), themeWatcherScriptPath); err != nil {
+	if err := docker.CopyToContainerWithOwnership(ctx.containerName, tmpFile.Name(), themeWatcherScriptPath, false); err != nil {
 		return err
 	}
 	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"chmod", "755", themeWatcherScriptPath}); err != nil {
@@ -680,11 +672,7 @@ puts api_key.key
 
 	scriptName := filepath.Base(tmpFile.Name())
 	containerScriptPath := path.Join("/tmp", scriptName)
-	if err := docker.CopyToContainer(ctx.containerName, tmpFile.Name(), containerScriptPath); err != nil {
-		return "", "", err
-	}
-	// Set ownership and permissions for the discourse user
-	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"chown", "discourse:discourse", containerScriptPath}); err != nil {
+	if err := docker.CopyToContainerWithOwnership(ctx.containerName, tmpFile.Name(), containerScriptPath, false); err != nil {
 		return "", "", err
 	}
 	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"chmod", "755", containerScriptPath}); err != nil {
@@ -785,7 +773,7 @@ exec chpst -u discourse:discourse -U discourse:discourse ruby "$WATCHER_BIN"
 	if err := tmpFile.Close(); err != nil {
 		return err
 	}
-	if err := docker.CopyToContainer(ctx.containerName, tmpFile.Name(), path.Join(serviceDir, "run")); err != nil {
+	if err := docker.CopyToContainerWithOwnership(ctx.containerName, tmpFile.Name(), path.Join(serviceDir, "run"), false); err != nil {
 		return err
 	}
 	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"chmod", "+x", path.Join(serviceDir, "run")}); err != nil {

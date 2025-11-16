@@ -400,11 +400,8 @@ var configCcrCmd = &cobra.Command{
 		if _, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.claude-code-router"}); err != nil {
 			return err
 		}
-		if err := docker.CopyToContainer(containerName, updatedPath, containerConfigPath); err != nil {
+		if err := docker.CopyToContainerWithOwnership(containerName, updatedPath, containerConfigPath, false); err != nil {
 			return fmt.Errorf("failed to copy CCR config into container: %w", err)
-		}
-		if _, err := docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", containerConfigPath}); err != nil {
-			return err
 		}
 
 		fmt.Fprintln(cmd.OutOrStdout(), "\nCreated new CCR config with OpenRouter model presets.")
@@ -545,11 +542,8 @@ func writeConfigToContainer(ccrCfg map[string]interface{}, containerName, workdi
 	if _, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.claude-code-router"}); err != nil {
 		return err
 	}
-	if err := docker.CopyToContainer(containerName, updatedPath, containerConfigPath); err != nil {
+	if err := docker.CopyToContainerWithOwnership(containerName, updatedPath, containerConfigPath, false); err != nil {
 		return fmt.Errorf("failed to copy CCR config into container: %w", err)
-	}
-	if _, err := docker.ExecAsRoot(containerName, workdir, []string{"chown", "discourse:discourse", containerConfigPath}); err != nil {
-		return err
 	}
 
 	fmt.Println("\n? CCR config written to container")
