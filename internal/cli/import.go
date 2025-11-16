@@ -193,6 +193,14 @@ var importCmd = &cobra.Command{
 		inContainerTmp := filepath.Join("/tmp", tmpBase)
 		inContainerPatches := filepath.Join(inContainerTmp, "patches")
 
+		// Set proper ownership and permissions for the patches directory
+		if _, err := docker.ExecAsRoot(name, "/", []string{"chown", "-R", "discourse:discourse", inContainerTmp}); err != nil {
+			return fmt.Errorf("failed to set ownership on patches directory: %v", err)
+		}
+		if _, err := docker.ExecAsRoot(name, "/", []string{"chmod", "-R", "755", inContainerTmp}); err != nil {
+			return fmt.Errorf("failed to set permissions on patches directory: %v", err)
+		}
+
 		// Inside container: ensure a clean state and the base SHA is available,
 		// then align base branch and create/checkout current branch at base
 		if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git reset --hard && git clean -fd"}); err != nil {

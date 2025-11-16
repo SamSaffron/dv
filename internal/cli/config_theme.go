@@ -683,6 +683,13 @@ puts api_key.key
 	if err := docker.CopyToContainer(ctx.containerName, tmpFile.Name(), containerScriptPath); err != nil {
 		return "", "", err
 	}
+	// Set ownership and permissions for the discourse user
+	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"chown", "discourse:discourse", containerScriptPath}); err != nil {
+		return "", "", err
+	}
+	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"chmod", "755", containerScriptPath}); err != nil {
+		return "", "", err
+	}
 	defer docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", fmt.Sprintf("rm -f %s", shellQuote(containerScriptPath))})
 
 	runnerCmd := fmt.Sprintf("cd %s && RAILS_ENV=development bundle exec rails runner %s", shellQuote(ctx.discourseRoot), shellQuote(containerScriptPath))
