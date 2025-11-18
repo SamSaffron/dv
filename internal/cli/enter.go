@@ -1,25 +1,29 @@
 package cli
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/spf13/cobra"
 
 	"dv/internal/docker"
 )
 
 var enterCmd = &cobra.Command{
-	Use:   "enter [--name NAME]",
+	Use:   "enter [NAME]",
 	Short: "Enter the container as 'discourse' (use --root for root)",
-	Args:  cobra.ArbitraryArgs,
+	Args:  cobra.MaximumNArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Complete container name for the first positional argument
+		if len(args) == 0 {
+			return completeAgentNames(cmd, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmdArgs := extractCommandArgs(args)
-		if len(cmdArgs) > 0 {
-			return fmt.Errorf("dv enter only opens a shell now; use 'dv run -- %s' to run commands inside the container", strings.Join(cmdArgs, " "))
+		var containerName string
+		if len(args) > 0 {
+			containerName = args[0]
 		}
 
-		ctx, ok, err := prepareContainerExecContext(cmd)
+		ctx, ok, err := prepareContainerExecContext(cmd, containerName)
 		if err != nil {
 			return err
 		}

@@ -19,7 +19,7 @@ type containerExecContext struct {
 	envs    []string
 }
 
-func prepareContainerExecContext(cmd *cobra.Command) (containerExecContext, bool, error) {
+func prepareContainerExecContext(cmd *cobra.Command, overrideName ...string) (containerExecContext, bool, error) {
 	configDir, err := xdg.ConfigDir()
 	if err != nil {
 		return containerExecContext{}, false, err
@@ -29,9 +29,14 @@ func prepareContainerExecContext(cmd *cobra.Command) (containerExecContext, bool
 		return containerExecContext{}, false, err
 	}
 
-	name, _ := cmd.Flags().GetString("name")
-	if name == "" {
-		name = currentAgentName(cfg)
+	name := ""
+	if len(overrideName) > 0 && overrideName[0] != "" {
+		name = overrideName[0]
+	} else {
+		name, _ = cmd.Flags().GetString("name")
+		if name == "" {
+			name = currentAgentName(cfg)
+		}
 	}
 	if strings.TrimSpace(name) == "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), "No container selected. Run 'dv start' first.")
