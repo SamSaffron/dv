@@ -64,6 +64,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 	rootCmd.AddCommand(runAgentCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(restartCmd)
+	rootCmd.AddCommand(resetCmd)
 	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(exposeCmd)
 	rootCmd.AddCommand(tuiCmd)

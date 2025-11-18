@@ -5,42 +5,32 @@ import (
 	"strings"
 )
 
-// buildDiscourseResetScript generates a shell script that performs common
-// Discourse development environment reset tasks:
-// - Stops services (unicorn, ember-cli)
-// - Cleans working tree
-// - Ensures full git history
-// - Executes custom checkout commands
-// - Reinstalls dependencies
-// - Resets and migrates databases
-// - Seeds users
-// - Restarts services on exit
-//
-// checkoutCmds should contain the git checkout logic specific to the caller
-// (e.g., PR checkout, branch checkout).
-func buildDiscourseResetScript(checkoutCmds []string) string {
-	lines := []string{
-		"set -euo pipefail",
-		"cleanup() { echo 'Starting services (as root): unicorn and ember-cli'; sudo /usr/bin/sv start unicorn || sudo sv start unicorn || true; sudo /usr/bin/sv start ember-cli || sudo sv start ember-cli || true; }",
-		"trap cleanup EXIT",
+// buildGitCleanupCommands generates commands to clean the working tree and ensure full history
+func buildGitCleanupCommands() []string {
+	return []string{
 		"echo 'Cleaning working tree...'",
 		"git reset --hard",
 		"git clean -fd",
 		"echo 'Ensuring full history is available (unshallow if needed)...'",
 		"if [ -f .git/shallow ]; then git fetch origin --tags --prune --unshallow; else git fetch origin --tags --prune; fi",
 	}
+}
 
-	// Insert caller-specific checkout commands
-	lines = append(lines, checkoutCmds...)
-
-	// Common post-checkout steps
-	lines = append(lines,
+// buildPostCheckoutCommands generates commands to show current HEAD and reinstall dependencies
+func buildPostCheckoutCommands() []string {
+	return []string{
 		"echo 'Current HEAD:'",
 		"git --no-pager log --oneline -n 1",
 		"echo 'Reinstalling dependencies (bundle and pnpm) if needed...'",
 		// Best-effort; do not fail the whole command if these fail
 		"(bundle check || bundle install) || true",
 		"(command -v pnpm >/dev/null 2>&1 && pnpm install) || true",
+	}
+}
+
+// buildDatabaseResetCommands generates commands to reset and migrate databases
+func buildDatabaseResetCommands() []string {
+	return []string{
 		"echo 'Stopping services (as root): unicorn and ember-cli'",
 		"sudo -n true 2>/dev/null || true",
 		"sudo /usr/bin/sv stop unicorn || sudo sv stop unicorn || true",
@@ -62,7 +52,40 @@ func buildDiscourseResetScript(checkoutCmds []string) string {
 		"echo \"  dev : $MIG_LOG_DEV\"",
 		"echo \"  test: $MIG_LOG_TEST\"",
 		"echo 'Done.'",
-	)
+	}
+}
+
+// buildDiscourseResetScript generates a shell script that performs common
+// Discourse development environment reset tasks:
+// - Stops services (unicorn, ember-cli)
+// - Cleans working tree
+// - Ensures full git history
+// - Executes custom checkout commands
+// - Reinstalls dependencies
+// - Resets and migrates databases
+// - Seeds users
+// - Restarts services on exit
+//
+// checkoutCmds should contain the git checkout logic specific to the caller
+// (e.g., PR checkout, branch checkout).
+func buildDiscourseResetScript(checkoutCmds []string) string {
+	lines := []string{
+		"set -euo pipefail",
+		"cleanup() { echo 'Starting services (as root): unicorn and ember-cli'; sudo /usr/bin/sv start unicorn || sudo sv start unicorn || true; sudo /usr/bin/sv start ember-cli || sudo sv start ember-cli || true; }",
+		"trap cleanup EXIT",
+	}
+
+	// Git cleanup
+	lines = append(lines, buildGitCleanupCommands()...)
+
+	// Caller-specific checkout commands
+	lines = append(lines, checkoutCmds...)
+
+	// Post-checkout steps
+	lines = append(lines, buildPostCheckoutCommands()...)
+
+	// Database reset
+	lines = append(lines, buildDatabaseResetCommands()...)
 
 	return strings.Join(lines, "\n")
 }
@@ -84,4 +107,23 @@ func buildBranchCheckoutCommands(branchName string) []string {
 		fmt.Sprintf("git checkout %s", branchName),
 		"git pull --ff-only || true",
 	}
+}
+
+// buildDiscourseDatabaseResetScript generates a shell script that performs
+// database reset only (no git operations):
+// - Stops services (unicorn, ember-cli)
+// - Resets and migrates databases
+// - Seeds users
+// - Restarts services on exit
+func buildDiscourseDatabaseResetScript() string {
+	lines := []string{
+		"set -euo pipefail",
+		"cleanup() { echo 'Starting services (as root): unicorn and ember-cli'; sudo /usr/bin/sv start unicorn || sudo sv start unicorn || true; sudo /usr/bin/sv start ember-cli || sudo sv start ember-cli || true; }",
+		"trap cleanup EXIT",
+	}
+
+	// Database reset (reuses shared logic)
+	lines = append(lines, buildDatabaseResetCommands()...)
+
+	return strings.Join(lines, "\n")
 }
