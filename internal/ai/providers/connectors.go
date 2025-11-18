@@ -23,6 +23,7 @@ var builtinConnectors = []connector{
 	&openRouterConnector{},
 	&openAIConnector{},
 	&anthropicConnector{},
+	&bedrockConnector{},
 }
 
 func envValue(env map[string]string, key string) string {

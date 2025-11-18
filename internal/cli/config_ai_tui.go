@@ -111,7 +111,7 @@ func newAiConfigModel(opts aiConfigOptions) aiConfigModel {
 	}
 
 	sp := spinner.New()
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
+	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 
 	return aiConfigModel{
 		ctx:             opts.ctx,
@@ -481,8 +481,9 @@ func (m *aiConfigModel) resize() {
 	bodyHeight := max(10, m.height-8)
 	detailHeight := 7
 	listHeight := bodyHeight - detailHeight
-	leftWidth := max(30, m.width/2-2)
-	rightWidth := max(30, m.width-leftWidth-4)
+	// Always use 50% width for each pane
+	leftWidth := m.width / 2
+	rightWidth := m.width / 2
 	m.llmList.SetSize(leftWidth, listHeight)
 	m.modelList.SetSize(rightWidth, listHeight)
 }
@@ -503,10 +504,10 @@ func (m aiConfigModel) View() string {
 	left := m.llmList.View()
 	right := m.modelList.View()
 	if m.focus == focusConfigured {
-		left = lipgloss.NewStyle().Border(lipgloss.ThickBorder(), true).BorderForeground(lipgloss.Color("212")).Render(left)
+		left = lipgloss.NewStyle().Border(lipgloss.ThickBorder(), true).BorderForeground(lipgloss.Color("39")).Render(left)
 		right = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Render(right)
 	} else {
-		right = lipgloss.NewStyle().Border(lipgloss.ThickBorder(), true).BorderForeground(lipgloss.Color("212")).Render(right)
+		right = lipgloss.NewStyle().Border(lipgloss.ThickBorder(), true).BorderForeground(lipgloss.Color("39")).Render(right)
 		left = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Render(left)
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, lipgloss.NewStyle().Width(2).Render(""), right)
@@ -519,7 +520,9 @@ func (m aiConfigModel) View() string {
 	}
 	errLine := ""
 	if m.errMsg != "" {
-		errLine = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(m.errMsg)
+		// Wrap error message to fit screen width
+		wrappedErr := lipgloss.NewStyle().Width(m.width - 4).Render(m.errMsg)
+		errLine = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(wrappedErr)
 	}
 	busy := ""
 	if m.busy {
@@ -527,7 +530,7 @@ func (m aiConfigModel) View() string {
 		if m.busyMessage != "" {
 			busyMsg = m.busyMessage
 		}
-		busy = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Render(m.spinner.View() + " " + busyMsg)
+		busy = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(m.spinner.View() + " " + busyMsg)
 	}
 
 	view := fmt.Sprintf("%s\n%s\n\n%s\n%s\n%s", status, body, detail, toast, errLine)
@@ -571,6 +574,7 @@ func (m aiConfigModel) renderStatusLine() string {
 		{"Groq", []string{"GROQ_API_KEY"}},
 		{"Gemini", []string{"GEMINI_API_KEY"}},
 		{"GitHub", []string{"GH_TOKEN"}},
+		{"Bedrock", []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}},
 	} {
 		val := firstNonEmpty(m.env, entry.Keys...)
 		if val != "" {
@@ -700,11 +704,11 @@ func (m aiConfigModel) renderDeleteModal() string {
 func (m aiConfigModel) renderSavingModal() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("212")).
+		Foreground(lipgloss.Color("39")).
 		Padding(0, 0, 1, 0)
 
 	spinnerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("212"))
+		Foreground(lipgloss.Color("39"))
 
 	messageStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("246")).
@@ -726,7 +730,7 @@ func (m aiConfigModel) renderSavingModal() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("212")).
+		BorderForeground(lipgloss.Color("39")).
 		Padding(2, 4).
 		Width(60)
 
@@ -744,11 +748,11 @@ func (m aiConfigModel) renderSavingModal() string {
 func (m aiConfigModel) renderTestingModal() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("212")).
+		Foreground(lipgloss.Color("39")).
 		Padding(0, 0, 1, 0)
 
 	spinnerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("212"))
+		Foreground(lipgloss.Color("39"))
 
 	successStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("42")).
@@ -763,7 +767,7 @@ func (m aiConfigModel) renderTestingModal() string {
 		Foreground(lipgloss.Color("203")).
 		Background(lipgloss.Color("52")).
 		Padding(1, 2).
-		Width(60)
+		Width(70 - 4) // Account for padding
 
 	messageStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("246"))
@@ -801,12 +805,15 @@ func (m aiConfigModel) renderTestingModal() string {
 		)
 	} else {
 		// Failed - make error VERY visible
+		// Wrap the error message to fit within the box width
+		errorWidth := 70 - 8 // Box width minus padding
+		wrappedError := lipgloss.NewStyle().Width(errorWidth).Render(m.testError)
 		lines = append(lines,
 			"",
 			errorTitleStyle.Render("❌  TEST FAILED  ❌"),
 			"",
 			"",
-			errorMsgStyle.Render(m.testError),
+			errorMsgStyle.Render(wrappedError),
 			"",
 			"",
 			messageStyle.Render("Press Enter to return to form"),
@@ -816,7 +823,7 @@ func (m aiConfigModel) renderTestingModal() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("212")).
+		BorderForeground(lipgloss.Color("39")).
 		Padding(2, 4).
 		Width(70)
 
@@ -961,6 +968,16 @@ func newCreateForm(entryID string, model ai.ProviderModel, meta ai.LLMMetadata, 
 	defaults := map[string]interface{}{}
 	if providerKey == "open_ai" {
 		defaults["enable_responses_api"] = true
+	}
+	if providerKey == "aws_bedrock" {
+		if accessKeyID := firstNonEmpty(env, "AWS_ACCESS_KEY_ID"); accessKeyID != "" {
+			defaults["access_key_id"] = accessKeyID
+		}
+		if region := firstNonEmpty(env, "AWS_REGION"); region != "" {
+			defaults["region"] = region
+		} else {
+			defaults["region"] = "us-west-2"
+		}
 	}
 	fields = append(fields, buildProviderParamFields(providerKey, meta, nil, defaults)...)
 	f := &createForm{
@@ -1112,7 +1129,7 @@ func (f *createForm) View() string {
 			rendered = fmt.Sprintf("%s: %s\nOptions: %s", field.Label, selectedStyle.Render(field.SelectValue), opts)
 		}
 		if i == f.focusIndex {
-			rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Render(rendered)
+			rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(rendered)
 		}
 		lines = append(lines, rendered, "")
 	}
@@ -1124,9 +1141,11 @@ func (f *createForm) View() string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true).Render("✅ Test passed! You can now save the configuration."))
 	}
 	if f.err != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(f.err))
+		// Wrap form error to fit within box width (80 - 4 for padding)
+		wrappedFormErr := lipgloss.NewStyle().Width(76).Render(f.err)
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(wrappedFormErr))
 	}
-	box := lipgloss.NewStyle().Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("212")).Width(80)
+	box := lipgloss.NewStyle().Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Width(80)
 	return box.Render(strings.Join(lines, "\n"))
 }
 
@@ -1250,6 +1269,8 @@ func providerSlug(entryID string) string {
 		return "open_router"
 	case "openai", "open_ai":
 		return "open_ai"
+	case "bedrock", "amazon_bedrock", "aws_bedrock":
+		return "aws_bedrock"
 	default:
 		return key
 	}
@@ -1453,6 +1474,8 @@ func providerKeyHints(entryID string) []string {
 		return []string{"OPENAI_API_KEY"}
 	case "anthropic":
 		return []string{"ANTHROPIC_API_KEY"}
+	case "bedrock":
+		return []string{"AWS_SECRET_ACCESS_KEY"}
 	default:
 		return nil
 	}
@@ -1493,11 +1516,11 @@ func max(a, b int) int {
 func (m aiConfigModel) renderLoadingScreen() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("212")).
+		Foreground(lipgloss.Color("39")).
 		Padding(1, 0)
 
 	spinnerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("212"))
+		Foreground(lipgloss.Color("39"))
 
 	progressStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("246")).
@@ -1519,7 +1542,7 @@ func (m aiConfigModel) renderLoadingScreen() string {
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("212")).
+		BorderForeground(lipgloss.Color("39")).
 		Padding(2, 4).
 		Width(60)
 

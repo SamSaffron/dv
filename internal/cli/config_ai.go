@@ -144,7 +144,7 @@ configuring new models, and are passed to the container when testing connections
 			cacheDir:     providerCache,
 		})
 
-		program := tea.NewProgram(model, tea.WithContext(cmd.Context()))
+		program := tea.NewProgram(model, tea.WithContext(cmd.Context()), tea.WithAltScreen())
 		if _, runErr := program.Run(); runErr != nil {
 			return runErr
 		}
