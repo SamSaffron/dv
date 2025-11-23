@@ -23,7 +23,12 @@ type DecodeError struct {
 
 func (e DecodeError) Error() string {
 	if e.Err != nil {
-		return e.Err.Error()
+		// Include a preview of the payload (first 500 chars) to help debug
+		preview := e.Payload
+		if len(preview) > 500 {
+			preview = preview[:500] + "...(truncated)"
+		}
+		return fmt.Sprintf("%s\n\nReceived output:\n%s", e.Err.Error(), preview)
 	}
 	return "decode error"
 }
@@ -51,14 +56,27 @@ func (c *Client) FetchState(ctx context.Context) (ai.LLMState, error) {
 	if err != nil {
 		return state, err
 	}
+
+	if c.Verbose {
+		fmt.Fprintf(os.Stderr, "=== RAW RAILS OUTPUT (%d bytes) ===\n", len(out))
+		fmt.Fprintln(os.Stderr, out)
+		fmt.Fprintln(os.Stderr, "=== END RAW OUTPUT ===")
+	}
+
+	// Extract JSON from output - skip any warnings/noise before the JSON
+	jsonOutput, err := c.extractJSON(out)
+	if err != nil {
+		return state, err
+	}
+
 	var payload struct {
 		DefaultLLMID int64          `json:"default_llm_id"`
 		Models       []ai.LLMModel  `json:"ai_llms"`
 		Meta         ai.LLMMetadata `json:"meta"`
 	}
-	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+	if err := json.Unmarshal([]byte(jsonOutput), &payload); err != nil {
 		return state, DecodeError{
-			Payload: out,
+			Payload: jsonOutput,
 			Err:     fmt.Errorf("decode LLM payload: %w", err),
 		}
 	}
@@ -126,10 +144,14 @@ func (c *Client) CreateModel(ctx context.Context, input CreateModelInput) (int64
 	if err != nil {
 		return 0, err
 	}
+	jsonOutput, err := c.extractJSON(out)
+	if err != nil {
+		return 0, err
+	}
 	var response struct {
 		ID int64 `json:"id"`
 	}
-	if err := json.Unmarshal([]byte(out), &response); err != nil {
+	if err := json.Unmarshal([]byte(jsonOutput), &response); err != nil {
 		return 0, fmt.Errorf("decode create response: %w", err)
 	}
 	return response.ID, nil
@@ -148,12 +170,33 @@ func (c *Client) runRails(ruby string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// extractJSON finds and returns the JSON portion from Rails output, skipping any warnings/noise.
+func (c *Client) extractJSON(out string) (string, error) {
+	jsonStart := strings.Index(out, "{")
+	if jsonStart == -1 {
+		return "", DecodeError{
+			Payload: out,
+			Err:     fmt.Errorf("no JSON object found in output"),
+		}
+	}
+
+	if c.Verbose && jsonStart > 0 {
+		fmt.Fprintf(os.Stderr, "=== SKIPPED %d bytes of non-JSON output ===\n", jsonStart)
+		fmt.Fprintf(os.Stderr, "%s\n", out[:jsonStart])
+	}
+
+	return out[jsonStart:], nil
+}
+
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 const fetchScript = `
 require "json"
+
+ActiveRecord::Base.logger = nil
+Rails.logger.level = 4
 
 default_llm_value = SiteSetting.ai_default_llm_model
 default_llm_id = if default_llm_value.present?
@@ -212,6 +255,9 @@ puts JSON.fast_generate(payload)
 
 const createScriptTemplate = `
 require "json"
+ActiveRecord::Base.logger = nil
+Rails.logger.level = 4
+
 payload_path = %s
 data = JSON.parse(File.read(payload_path))
 attrs = data["attributes"] || {}
@@ -304,6 +350,9 @@ func (c *Client) TestModel(ctx context.Context, input CreateModelInput) error {
 
 const deleteScriptTemplate = `
 require "json"
+ActiveRecord::Base.logger = nil
+Rails.logger.level = 4
+
 llm = LlmModel.find_by(id: %d)
 raise "LLM model not found" if llm.nil?
 if llm.seeded?
@@ -322,6 +371,8 @@ puts JSON.fast_generate({ deleted: true, id: llm.id })
 
 const updateScriptTemplate = `
 require "json"
+ActiveRecord::Base.logger = nil
+Rails.logger.level = 4
 
 payload_path = %s
 data = JSON.parse(File.read(payload_path))
@@ -342,6 +393,8 @@ puts JSON.fast_generate({ id: llm.id })
 
 const testScriptTemplate = `
 require "json"
+ActiveRecord::Base.logger = nil
+Rails.logger.level = 4
 
 payload_path = %s
 data = JSON.parse(File.read(payload_path))
@@ -405,6 +458,8 @@ puts JSON.fast_generate({ github_token_set: true })
 
 const enableFeaturesTemplate = `
 require "json"
+ActiveRecord::Base.logger = nil
+Rails.logger.level = 4
 
 SiteSetting.discourse_ai_enabled = true
 [

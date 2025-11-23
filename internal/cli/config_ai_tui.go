@@ -83,32 +83,31 @@ type aiConfigModel struct {
 }
 
 func newAiConfigModel(opts aiConfigOptions) aiConfigModel {
-	var llmList, modelList list.Model
 	mode := modeBrowse
 	loadingProgress := []string{}
 
 	if opts.loadingState {
 		mode = modeLoading
 		loadingProgress = []string{"Starting up..."}
-	} else {
-		llmItems := make([]list.Item, 0, len(opts.state.Models))
-		for _, m := range opts.state.Models {
-			llmItems = append(llmItems, llmItem{model: m, isDefault: m.ID == opts.state.DefaultID})
-		}
-		llmDelegate := list.NewDefaultDelegate()
-		llmList = list.New(llmItems, llmDelegate, 0, 0)
-		llmList.Title = "Configured Models"
-		llmList.SetShowStatusBar(false)
-		llmList.SetFilteringEnabled(true)
-		llmList.SetShowPagination(false)
-
-		providerItems := catalogItems(opts.catalog)
-		providerDelegate := list.NewDefaultDelegate()
-		modelList = list.New(providerItems, providerDelegate, 0, 0)
-		modelList.Title = "Provider Catalog"
-		modelList.SetShowStatusBar(false)
-		modelList.SetShowPagination(false)
 	}
+
+	llmItems := make([]list.Item, 0, len(opts.state.Models))
+	for _, m := range opts.state.Models {
+		llmItems = append(llmItems, llmItem{model: m, isDefault: m.ID == opts.state.DefaultID})
+	}
+	llmDelegate := list.NewDefaultDelegate()
+	llmList := list.New(llmItems, llmDelegate, 0, 0)
+	llmList.Title = "Configured Models"
+	llmList.SetShowStatusBar(false)
+	llmList.SetFilteringEnabled(true)
+	llmList.SetShowPagination(false)
+
+	providerItems := catalogItems(opts.catalog)
+	providerDelegate := list.NewDefaultDelegate()
+	modelList := list.New(providerItems, providerDelegate, 0, 0)
+	modelList.Title = "Provider Catalog"
+	modelList.SetShowStatusBar(false)
+	modelList.SetShowPagination(false)
 
 	sp := spinner.New()
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
