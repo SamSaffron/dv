@@ -178,61 +178,102 @@ func (s *extractSync) runContainerWatcher() error {
 		return err
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
+	// Ensure cleanup happens when context is cancelled
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
 		select {
 		case <-s.ctx.Done():
+			// Force kill the process immediately
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
-			_ = cmd.Wait()
-			return nil
-		default:
+		case <-done:
 		}
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		absPath, ok := parseInotifyLine(line)
-		if !ok {
-			s.debugf("ignoring unrecognized inotify line: %s", line)
-			continue
-		}
-		if !path.IsAbs(absPath) {
-			absPath = path.Clean(path.Join(s.workdir, absPath))
-		}
-		rel, ok := s.relativeFromContainer(absPath)
-		if !ok || rel == "" || rel == "." || shouldIgnoreRelative(rel) {
-			s.debugf("ignoring container event outside workdir: abs=%s rel=%s", absPath, rel)
-			continue
-		}
-		// Directory events do not need to be queued; file events will arrive as children are modified.
-		s.debugf("queueing container event: abs=%s rel=%s", absPath, rel)
-		s.queueEvent(watcherEvent{source: sourceContainer, path: rel})
-	}
+	}()
 
-	if err := scanner.Err(); err != nil {
-		if s.ctx.Err() != nil {
-			return nil
+	// Read lines in a separate goroutine to avoid blocking on scanner.Scan()
+	lines := make(chan string, 100)
+	scanErr := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			select {
+			case <-s.ctx.Done():
+				return
+			case lines <- scanner.Text():
+			}
 		}
-		msg := strings.TrimSpace(stderrBuf.String())
-		if msg != "" {
-			return fmt.Errorf("container watcher stream error: %w: %s", err, msg)
-		}
-		return fmt.Errorf("container watcher stream error: %w", err)
-	}
+		scanErr <- scanner.Err()
+		close(lines)
+	}()
 
-	if err := cmd.Wait(); err != nil {
-		if s.ctx.Err() != nil {
+	// Process lines until context is cancelled or scanner finishes
+	for {
+		select {
+		case <-s.ctx.Done():
+			// Give the process a moment to exit cleanly
+			waitDone := make(chan error, 1)
+			go func() {
+				waitDone <- cmd.Wait()
+			}()
+			select {
+			case <-time.After(100 * time.Millisecond):
+				// Timeout waiting, force kill again just to be sure
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+			case <-waitDone:
+			}
 			return nil
+		case line, ok := <-lines:
+			if !ok {
+				// Scanner finished, check for errors
+				if err := <-scanErr; err != nil {
+					if s.ctx.Err() != nil {
+						return nil
+					}
+					msg := strings.TrimSpace(stderrBuf.String())
+					if msg != "" {
+						return fmt.Errorf("container watcher stream error: %w: %s", err, msg)
+					}
+					return fmt.Errorf("container watcher stream error: %w", err)
+				}
+				if err := cmd.Wait(); err != nil {
+					if s.ctx.Err() != nil {
+						return nil
+					}
+					msg := strings.TrimSpace(stderrBuf.String())
+					if msg != "" {
+						return fmt.Errorf("container watcher exited: %w: %s", err, msg)
+					}
+					return fmt.Errorf("container watcher exited: %w", err)
+				}
+				return nil
+			}
+
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			absPath, ok := parseInotifyLine(line)
+			if !ok {
+				s.debugf("ignoring unrecognized inotify line: %s", line)
+				continue
+			}
+			if !path.IsAbs(absPath) {
+				absPath = path.Clean(path.Join(s.workdir, absPath))
+			}
+			rel, ok := s.relativeFromContainer(absPath)
+			if !ok || rel == "" || rel == "." || shouldIgnoreRelative(rel) {
+				s.debugf("ignoring container event outside workdir: abs=%s rel=%s", absPath, rel)
+				continue
+			}
+			// Directory events do not need to be queued; file events will arrive as children are modified.
+			s.debugf("queueing container event: abs=%s rel=%s", absPath, rel)
+			s.queueEvent(watcherEvent{source: sourceContainer, path: rel})
 		}
-		msg := strings.TrimSpace(stderrBuf.String())
-		if msg != "" {
-			return fmt.Errorf("container watcher exited: %w: %s", err, msg)
-		}
-		return fmt.Errorf("container watcher exited: %w", err)
 	}
-	return nil
 }
 
 func (s *extractSync) processEvents() error {
@@ -274,7 +315,18 @@ func (s *extractSync) processEvents() error {
 					}
 				}
 			}
-			return flush()
+			// Flush with a timeout to prevent hanging on cleanup
+			flushDone := make(chan error, 1)
+			go func() {
+				flushDone <- flush()
+			}()
+			select {
+			case err := <-flushDone:
+				return err
+			case <-time.After(2 * time.Second):
+				// Timeout during cleanup - exit anyway
+				return nil
+			}
 		case event := <-s.events:
 			if event.source == sourceHost {
 				hostPaths[event.path] = struct{}{}
