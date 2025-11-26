@@ -23,6 +23,7 @@ RUN npm i -g @kilocode/cli
 RUN sudo -H -u discourse /bin/bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
 RUN sudo -H -u discourse /bin/bash -lc 'curl -LsSf https://aider.chat/install.sh | sh'
 RUN sudo -H -u discourse /bin/bash -lc 'curl -fsS https://cursor.com/install | bash'
+RUN sudo -H -u discourse /bin/bash -lc 'curl -fsSL https://app.factory.ai/cli | sh'
 
 RUN tee /tmp/seed_users.rb > /dev/null <<'EOF'
 u = User.new(username: "admin", email: "admin@example.com")

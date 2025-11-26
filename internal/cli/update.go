@@ -73,6 +73,7 @@ var updateAgentsCmd = &cobra.Command{
 			{label: "Aider", command: "curl -LsSf https://aider.chat/install.sh | sh", useUserPaths: true},
 			{label: "Cursor Agent", command: "curl -fsS https://cursor.com/install | bash", useUserPaths: true},
 			{label: "KiloCode CLI", command: "npm install -g @kilocode/cli", runAsRoot: true},
+			{label: "Factory Droid", command: "curl -fsSL https://app.factory.ai/cli | sh", useUserPaths: true},
 		}
 
 		for _, step := range steps {
