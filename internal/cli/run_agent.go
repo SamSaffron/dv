@@ -127,12 +127,13 @@ var runAgentCmd = &cobra.Command{
 		}
 		workdir := config.EffectiveWorkdir(cfg, imgCfg, name)
 
-		// Copy configured files (auth, etc.) into the container as in `enter`
-		copyConfiguredFiles(cmd, cfg, name, workdir)
-
 		// Parse args: first token is the agent name
 		agent := args[0]
 		agentLower := strings.ToLower(agent)
+
+		// Copy configured files (auth, etc.) into the container as in `enter`,
+		// but scoped to the requested agent when configured.
+		copyConfiguredFiles(cmd, cfg, name, workdir, agentLower)
 
 		envs := buildAgentEnv(cfg, agentLower, cmd)
 

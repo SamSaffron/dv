@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -66,7 +67,7 @@ func prepareContainerExecContext(cmd *cobra.Command, overrideName ...string) (co
 	}
 	workdir := config.EffectiveWorkdir(cfg, imgCfg, name)
 
-	copyConfiguredFiles(cmd, cfg, name, workdir)
+	copyConfiguredFiles(cmd, cfg, name, workdir, "")
 
 	envs := collectEnvPassthrough(cfg)
 
@@ -77,21 +78,34 @@ func prepareContainerExecContext(cmd *cobra.Command, overrideName ...string) (co
 	}, true, nil
 }
 
-func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, workdir string) {
-	for hostSrc, containerDst := range cfg.CopyFiles {
-		hostPath := expandHostPath(hostSrc)
-		if hostPath == "" {
+func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, workdir, agent string) {
+	agent = strings.ToLower(strings.TrimSpace(agent))
+	for _, rule := range cfg.CopyRules {
+		if !ruleMatchesAgent(rule, agent) {
 			continue
 		}
-		if st, err := os.Stat(hostPath); err != nil || !st.Mode().IsRegular() {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Skipping copy (not found): %s -> %s\n", hostPath, containerDst)
+		hostPaths := expandHostSources(rule.Host)
+		if len(hostPaths) == 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Skipping copy (not found): %s -> %s\n", rule.Host, rule.Container)
 			continue
 		}
-		dstDir := filepath.Dir(containerDst)
-		_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
-		if err := docker.CopyToContainerWithOwnership(containerName, hostPath, containerDst, false); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hostPath, containerDst, err)
-			continue
+		for _, hostPath := range hostPaths {
+			if hostPath == "" {
+				continue
+			}
+			st, err := os.Stat(hostPath)
+			if err != nil || !st.Mode().IsRegular() {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Skipping copy (not found): %s -> %s\n", hostPath, rule.Container)
+				continue
+			}
+
+			target := containerPathFor(rule.Container, hostPath)
+			dstDir := filepath.Dir(target)
+			_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
+			if err := docker.CopyToContainerWithOwnership(containerName, hostPath, target, false); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hostPath, target, err)
+				continue
+			}
 		}
 	}
 }
@@ -125,7 +139,41 @@ func expandHostPath(p string) string {
 	return abs
 }
 
+func expandHostSources(p string) []string {
+	expanded := expandHostPath(p)
+	if strings.ContainsAny(expanded, "*?[") {
+		matches, err := filepath.Glob(expanded)
+		if err != nil {
+			return nil
+		}
+		return matches
+	}
+	return []string{expanded}
+}
+
 // shellQuote returns a single-quoted shell-safe string.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+func ruleMatchesAgent(rule config.CopyRule, agent string) bool {
+	if len(rule.Agents) == 0 {
+		return true
+	}
+	if agent == "" {
+		return false
+	}
+	for _, a := range rule.Agents {
+		if strings.EqualFold(strings.TrimSpace(a), agent) {
+			return true
+		}
+	}
+	return false
+}
+
+func containerPathFor(containerDst string, hostPath string) string {
+	if strings.HasSuffix(containerDst, "/") {
+		return path.Join(containerDst, filepath.Base(hostPath))
+	}
+	return containerDst
 }

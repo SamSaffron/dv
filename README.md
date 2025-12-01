@@ -126,7 +126,7 @@ dv enter [--name NAME]
 ```
 
 Notes:
-- Copies any configured host files into the container before launching the shell (see `copyFiles` under config).
+- Copies any configured host files into the container before launching the shell (see `copyRules` under config).
 
 ### dv run
 Run a non-interactive command inside the running container (defaults to the `discourse` user).
@@ -316,17 +316,21 @@ dv config show
 #### Theme bootstrap
 Use `dv config theme [REPO]` to prepare a theme workspace inside the running container. Running it with no arguments prompts for a name **and** whether you’re building a full theme or component, installs the `discourse_theme` gem, scaffolds a minimal theme under `/home/discourse/<name>`, writes an `AGENTS.md` brief for AI tools, and updates the workdir override so `dv enter` drops you there. Supplying a git URL or `owner/repo` slug clones the existing theme instead of generating a skeleton, while still installing the gem, writing `AGENTS.md`, and configuring the watcher. Each workspace also receives a `theme-watch-<slug>` runit service that runs `discourse_theme watch` with an API key that’s automatically bound to the first admin user; restart it anytime with `sv restart theme-watch-<slug>` inside the container. Pass `--theme-name` (and optionally `--kind theme|component`) to skip the interactive prompts, and `--verbose` if you want to see every helper command that runs (handy when debugging API key or watcher issues).
 
-#### Copying host files before enter/run
-Configure files to copy from the host into the container every time you run `dv enter` or `dv run` by setting `copyFiles` in your config. Keys are host paths (supporting `~` and env vars), values are absolute container paths. A sensible default is provided for Codex auth:
+#### Copying host files before enter/run-agent
+Use `copyRules` in your config to copy host files into the container. Each rule sets a host path (supports `~`, env vars, and globs) and a container destination, plus optional `agents` to only copy when that agent is run via `dv run-agent`. Unscoped rules run for `dv enter`/`dv run`; agent-scoped rules skip those commands.
 
 ```json
 {
-  "copyFiles": {
-    "~/.codex/auth.json": "/home/discourse/.codex/auth.json"
-  }
+  "copyRules": [
+    { "host": "~/.codex/auth.json",      "container": "/home/discourse/.codex/auth.json",      "agents": ["codex"] },
+    { "host": "~/.kilocode/config.json", "container": "/home/discourse/.kilocode/config.json", "agents": ["kilocode"] },
+    { "host": "~/.gemini/GEMINI.md",     "container": "/home/discourse/.gemini/GEMINI.md",     "agents": ["gemini"] },
+    { "host": "~/.gemini/*.json",        "container": "/home/discourse/.gemini/",              "agents": ["gemini"] },
+    { "host": "~/.gemini/google_account_id",     "container": "/home/discourse/google_account_id",     "agents": ["gemini"] }
+  ]
 }
 ```
-The parent directory inside the container is created if needed, and ownership is set to `discourse:discourse` so the file is readable by the working user.
+The parent directory inside the container is created if needed, glob patterns are expanded on the host, and ownership is set to `discourse:discourse` so files stay readable by the working user.
 
 ### dv data
 Print the data directory path (`${XDG_DATA_HOME}/dv`).

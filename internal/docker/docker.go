@@ -254,13 +254,23 @@ func ExecAsRoot(name, workdir string, argv []string) (string, error) {
 
 func CopyFromContainer(name, srcInContainer, dstOnHost string) error {
 	cmd := exec.Command("docker", "cp", fmt.Sprintf("%s:%s", name, srcInContainer), dstOnHost)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if isTruthyEnv("DV_VERBOSE") {
+		cmd.Stdout = os.Stdout
+	} else {
+		cmd.Stdout = io.Discard
+	}
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func CopyToContainer(name, srcOnHost, dstInContainer string) error {
 	cmd := exec.Command("docker", "cp", srcOnHost, fmt.Sprintf("%s:%s", name, dstInContainer))
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if isTruthyEnv("DV_VERBOSE") {
+		cmd.Stdout = os.Stdout
+	} else {
+		cmd.Stdout = io.Discard
+	}
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 

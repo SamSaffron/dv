@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -37,7 +38,17 @@ type Config struct {
 	// should be copied into the container at `dv enter` time. Host paths may
 	// include `~` for home and environment variables; they are expanded at
 	// runtime. Keys are host paths, values are container paths.
-	CopyFiles map[string]string `json:"copyFiles"`
+	CopyFiles map[string]string `json:"copyFiles,omitempty"`
+	// CopyRules is the preferred representation of copy mappings with optional
+	// agent scoping.
+	CopyRules []CopyRule `json:"copyRules,omitempty"`
+}
+
+// CopyRule represents a host->container copy mapping with optional agent scoping.
+type CopyRule struct {
+	Host      string   `json:"host"`
+	Container string   `json:"container"`
+	Agents    []string `json:"agents,omitempty"`
 }
 
 // ImageSource describes how to obtain the Dockerfile for an image.
@@ -89,10 +100,7 @@ func Default() Config {
 			},
 		},
 		ContainerImages: map[string]string{},
-		CopyFiles: map[string]string{
-			"~/.codex/auth.json":      "/home/discourse/.codex/auth.json",
-			"~/.kilocode/config.json": "/home/discourse/.kilocode/config.json",
-		},
+		CopyRules:       defaultCopyRules(),
 	}
 }
 
@@ -138,15 +146,10 @@ func LoadOrCreate(configDir string) (Config, error) {
 	if cfg.ContainerImages == nil {
 		cfg.ContainerImages = map[string]string{}
 	}
-	if cfg.CopyFiles == nil {
-		cfg.CopyFiles = map[string]string{
-			"~/.codex/auth.json":      "/home/discourse/.codex/auth.json",
-			"~/.kilocode/config.json": "/home/discourse/.kilocode/config.json",
-		}
-	}
 	if cfg.CustomWorkdirs == nil {
 		cfg.CustomWorkdirs = map[string]string{}
 	}
+	cfg.migrateCopyFiles()
 	if w := strings.TrimSpace(cfg.CustomWorkdir); w != "" {
 		target := cfg.SelectedAgent
 		if target == "" {
@@ -162,6 +165,7 @@ func LoadOrCreate(configDir string) (Config, error) {
 }
 
 func Save(configDir string, cfg Config) error {
+	cfg.migrateCopyFiles()
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
@@ -185,6 +189,81 @@ func valueOrDefault(value int, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func defaultCopyRules() []CopyRule {
+	return []CopyRule{
+		{
+			Host:      "~/.codex/auth.json",
+			Container: "/home/discourse/.codex/auth.json",
+			Agents:    []string{"codex"},
+		},
+		{
+			Host:      "~/.kilocode/config.json",
+			Container: "/home/discourse/.kilocode/config.json",
+			Agents:    []string{"kilocode"},
+		},
+		{
+			Host:      "~/.gemini/GEMINI.md",
+			Container: "/home/discourse/.gemini/GEMINI.md",
+			Agents:    []string{"gemini"},
+		},
+		{
+			Host:      "~/.gemini/*.json",
+			Container: "/home/discourse/.gemini/",
+			Agents:    []string{"gemini"},
+		},
+		{
+			Host:      "~/.gemini/google_account_id",
+			Container: "/home/discourse/.gemini/",
+			Agents:    []string{"gemini"},
+		},
+	}
+}
+
+func (cfg *Config) migrateCopyFiles() {
+	origNil := cfg.CopyRules == nil
+	if origNil {
+		cfg.CopyRules = []CopyRule{}
+	}
+	migrated := false
+	if len(cfg.CopyRules) == 0 && len(cfg.CopyFiles) > 0 {
+		keys := make([]string, 0, len(cfg.CopyFiles))
+		for src := range cfg.CopyFiles {
+			keys = append(keys, src)
+		}
+		sort.Strings(keys)
+		for _, src := range keys {
+			cfg.CopyRules = append(cfg.CopyRules, CopyRule{
+				Host:      src,
+				Container: cfg.CopyFiles[src],
+			})
+		}
+		migrated = true
+	}
+	switch {
+	case origNil:
+		cfg.CopyRules = appendMissingDefaultCopyRules(cfg.CopyRules, defaultCopyRules())
+	case migrated:
+		cfg.CopyRules = appendMissingDefaultCopyRules(cfg.CopyRules, defaultCopyRules())
+	}
+	cfg.CopyFiles = nil
+}
+
+func appendMissingDefaultCopyRules(rules []CopyRule, defaults []CopyRule) []CopyRule {
+	existing := map[string]struct{}{}
+	for _, r := range rules {
+		key := strings.ToLower(strings.TrimSpace(r.Host)) + "\x00" + strings.ToLower(strings.TrimSpace(r.Container))
+		existing[key] = struct{}{}
+	}
+	for _, d := range defaults {
+		key := strings.ToLower(strings.TrimSpace(d.Host)) + "\x00" + strings.ToLower(strings.TrimSpace(d.Container))
+		if _, ok := existing[key]; ok {
+			continue
+		}
+		rules = append(rules, d)
+	}
+	return rules
 }
 
 // EffectiveWorkdir returns the runtime working directory dv commands should use.

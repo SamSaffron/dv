@@ -12,6 +12,11 @@ var rootCmd = &cobra.Command{
 	Short:         "Discourse Vibe: manage local Discourse dev containers",
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+			os.Setenv("DV_VERBOSE", "1")
+		}
+	},
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
 	},
