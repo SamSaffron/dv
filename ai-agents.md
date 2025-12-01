@@ -29,7 +29,6 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `internal/config/`: JSON configuration management
 - `internal/docker/`: Docker CLI wrappers
 - `internal/xdg/`: XDG path helpers
-- `bin/`: Legacy bash scripts (superseded by `dv`)
 
 ## XDG Paths and Persistence
 - Config: `${XDG_CONFIG_HOME}/dv/config.json` (fallback: `~/.config/dv/config.json`)
@@ -107,6 +106,8 @@ This guide documents the repository purpose, key files, and operational guidelin
   ```bash
   go install golang.org/x/tools/cmd/goimports@latest
   ```
+
+- After running `go build` leave the dv binary around. No need to delete it.
 
 ## Environment Variables
 Auto-passed to container when set on host: `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `AMP_API_KEY`, `KILOCODE_API_KEY`, `FACTORY_API_KEY`.
