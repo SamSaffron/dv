@@ -252,6 +252,11 @@ func buildAgentEnv(cfg config.Config, agent string, cmd *cobra.Command) []string
 			envs = append(envs, key)
 		}
 	}
+
+	if rule, ok := agentRules[agent]; ok {
+		envs = append(envs, rule.env...)
+	}
+
 	// Ensure a sane runtime environment for discourse user
 	envs = append(envs,
 		"HOME=/home/discourse",
@@ -301,6 +306,7 @@ type agentRule struct {
 	interactive func() []string
 	withPrompt  func(prompt string) []string
 	defaults    []string
+	env         []string
 }
 
 var agentRules = map[string]agentRule{
@@ -337,6 +343,7 @@ var agentRules = map[string]agentRule{
 		interactive: func() []string { return []string{"gemini"} },
 		withPrompt:  func(p string) []string { return []string{"gemini", "-p", p} },
 		defaults:    []string{"-y"},
+		env:         []string{"GEMINI_PROMPT_GIT=0"},
 	},
 	"crush": {
 		interactive: func() []string { return []string{"crush"} },
