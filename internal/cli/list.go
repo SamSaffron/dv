@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -29,8 +31,8 @@ var listCmd = &cobra.Command{
 			return err
 		}
 
-		// Include Ports and Labels columns for discovery and clickable URLs
-		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}'")
+		// Include Ports, Labels, and CreatedAt for discovery, clickable URLs, and ordering
+		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}\t{{.CreatedAt}}'")
 		selected := cfg.SelectedAgent
 		var agents []agentInfo
 
@@ -38,7 +40,7 @@ var listCmd = &cobra.Command{
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			parts := strings.SplitN(line, "\t", 5)
+			parts := strings.SplitN(line, "\t", 6)
 			if len(parts) < 3 {
 				continue
 			}
@@ -50,6 +52,10 @@ var listCmd = &cobra.Command{
 			labelsField := ""
 			if len(parts) >= 5 {
 				labelsField = parts[4]
+			}
+			createdAt := time.Time{}
+			if len(parts) >= 6 {
+				createdAt = parseDockerTime(parts[5])
 			}
 			// Determine if this container belongs to the selected image
 			belongs := false
@@ -76,13 +82,16 @@ var listCmd = &cobra.Command{
 			urls := parseHostPortURLs(portsField)
 
 			agents = append(agents, agentInfo{
-				name:     name,
-				status:   statusText,
-				time:     timeText,
-				urls:     urls,
-				selected: selected != "" && name == selected,
+				name:      name,
+				status:    statusText,
+				time:      timeText,
+				createdAt: createdAt,
+				urls:      urls,
+				selected:  selected != "" && name == selected,
 			})
 		}
+
+		sortAgents(agents)
 
 		// Print in ls -l style format
 		if len(agents) == 0 {
@@ -193,11 +202,12 @@ func parseLabels(labelsField string) map[string]string {
 
 // agentInfo holds information about a container for formatted display
 type agentInfo struct {
-	name     string
-	status   string
-	time     string
-	urls     []string
-	selected bool
+	name      string
+	status    string
+	time      string
+	createdAt time.Time
+	urls      []string
+	selected  bool
 }
 
 // calculateMaxNameWidth finds the longest agent name and returns an appropriate column width
@@ -217,6 +227,47 @@ func calculateMaxNameWidth(agents []agentInfo) int {
 	}
 
 	return maxWidth
+}
+
+// parseDockerTime parses the CreatedAt field emitted by `docker ps --format {{.CreatedAt}}`.
+// Example: "2024-07-20 15:04:05 -0700 MST"
+func parseDockerTime(createdAt string) time.Time {
+	createdAt = strings.TrimSpace(createdAt)
+	if createdAt == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse("2006-01-02 15:04:05 -0700 MST", createdAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// sortAgents orders agents with non-running (stopped/created) first by oldest creation time,
+// followed by running agents also ordered from oldest to newest. This keeps active containers
+// at the bottom while preserving a predictable age-based ordering.
+func sortAgents(agents []agentInfo) {
+	sort.SliceStable(agents, func(i, j int) bool {
+		iRunning := agents[i].status == "Running"
+		jRunning := agents[j].status == "Running"
+		if iRunning != jRunning {
+			return !iRunning && jRunning
+		}
+
+		iHasTime := !agents[i].createdAt.IsZero()
+		jHasTime := !agents[j].createdAt.IsZero()
+		if iHasTime && jHasTime {
+			if agents[i].createdAt.Equal(agents[j].createdAt) {
+				return agents[i].name < agents[j].name
+			}
+			return agents[i].createdAt.Before(agents[j].createdAt)
+		}
+		if iHasTime != jHasTime {
+			return iHasTime && !jHasTime
+		}
+
+		return agents[i].name < agents[j].name
+	})
 }
 
 // parseStatus extracts status and time information from Docker status string
