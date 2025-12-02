@@ -43,6 +43,12 @@ func Remove(name string) error {
 	return cmd.Run()
 }
 
+func RemoveForce(name string) error {
+	cmd := exec.Command("docker", "rm", "-f", name)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 func Rename(oldName, newName string) error {
 	cmd := exec.Command("docker", "rename", oldName, newName)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

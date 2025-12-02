@@ -55,8 +55,11 @@ var removeCmd = &cobra.Command{
 
 		if docker.Exists(name) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Stopping and removing container '%s'...\n", name)
-			_ = docker.Stop(name)
-			_ = docker.Remove(name)
+			if docker.Running(name) {
+				_ = docker.RemoveForce(name)
+			} else {
+				_ = docker.Remove(name)
+			}
 		} else {
 			fmt.Fprintf(cmd.OutOrStdout(), "Container '%s' does not exist\n", name)
 		}
