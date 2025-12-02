@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"dv/internal/config"
+	"dv/internal/localproxy"
 	"dv/internal/xdg"
 )
 
@@ -30,6 +31,8 @@ var listCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		proxyActive := cfg.LocalProxy.Enabled && localproxy.Running(cfg.LocalProxy)
 
 		// Include Ports, Labels, and CreatedAt for discovery, clickable URLs, and ordering
 		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}\t{{.CreatedAt}}'")
@@ -53,6 +56,7 @@ var listCmd = &cobra.Command{
 			if len(parts) >= 5 {
 				labelsField = parts[4]
 			}
+			labelMap := parseLabels(labelsField)
 			createdAt := time.Time{}
 			if len(parts) >= 6 {
 				createdAt = parseDockerTime(parts[5])
@@ -63,7 +67,7 @@ var listCmd = &cobra.Command{
 				belongs = true
 			}
 			if !belongs {
-				if labelMap := parseLabels(labelsField); labelMap["com.dv.owner"] == "dv" && labelMap["com.dv.image-name"] == imgName {
+				if labelMap["com.dv.owner"] == "dv" && labelMap["com.dv.image-name"] == imgName {
 					belongs = true
 				}
 			}
@@ -80,6 +84,18 @@ var listCmd = &cobra.Command{
 			// Parse status and time
 			statusText, timeText := parseStatus(status)
 			urls := parseHostPortURLs(portsField)
+			if proxyActive {
+				if host, _, httpPort, ok := localproxy.RouteFromLabels(labelMap); ok && host != "" {
+					if httpPort <= 0 {
+						httpPort = cfg.LocalProxy.HTTPPort
+					}
+					if httpPort > 0 && httpPort != 80 {
+						urls = []string{fmt.Sprintf("http://%s:%d", host, httpPort)}
+					} else {
+						urls = []string{"http://" + host}
+					}
+				}
+			}
 
 			agents = append(agents, agentInfo{
 				name:      name,

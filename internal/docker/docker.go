@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -303,4 +304,34 @@ func shellEscape(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+func Labels(name string) (map[string]string, error) {
+	cmd := exec.Command("docker", "inspect", "-f", "{{json .Config.Labels}}", name)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	labels := map[string]string{}
+	if err := json.Unmarshal(out, &labels); err != nil {
+		return nil, err
+	}
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	return labels, nil
+}
+
+func UpdateLabels(name string, labels map[string]string) error {
+	if len(labels) == 0 {
+		return nil
+	}
+	args := []string{"update"}
+	for k, v := range labels {
+		args = append(args, "--label-add", fmt.Sprintf("%s=%s", k, v))
+	}
+	args = append(args, name)
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }

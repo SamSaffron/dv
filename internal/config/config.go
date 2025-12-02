@@ -18,6 +18,7 @@ type Config struct {
 	Workdir          string            `json:"workdir"`
 	CustomWorkdir    string            `json:"customWorkdir,omitempty"`
 	CustomWorkdirs   map[string]string `json:"customWorkdirs,omitempty"`
+	LocalProxy       LocalProxyConfig  `json:"localProxy,omitempty"`
 	// HostStartingPort is the first port to try on the host.
 	HostStartingPort    int      `json:"hostStartingPort"`
 	ContainerPort       int      `json:"containerPort"`
@@ -71,12 +72,21 @@ type ImageConfig struct {
 	Dockerfile    ImageSource `json:"dockerfile"`
 }
 
+type LocalProxyConfig struct {
+	Enabled       bool   `json:"enabled"`
+	ContainerName string `json:"containerName"`
+	ImageTag      string `json:"imageTag"`
+	HTTPPort      int    `json:"httpPort"`
+	APIPort       int    `json:"apiPort"`
+}
+
 func Default() Config {
 	return Config{
 		ImageTag:         "ai_agent",
 		DefaultContainer: "ai_agent",
 		Workdir:          "/var/www/discourse",
 		CustomWorkdirs:   map[string]string{},
+		LocalProxy:       defaultLocalProxyConfig(),
 		HostStartingPort: 4200,
 		ContainerPort:    4200,
 		EnvPassthrough: []string{
@@ -161,6 +171,7 @@ func LoadOrCreate(configDir string) (Config, error) {
 		cfg.CustomWorkdirs[target] = w
 		cfg.CustomWorkdir = ""
 	}
+	cfg.LocalProxy.ApplyDefaults()
 	return cfg, nil
 }
 
@@ -287,4 +298,29 @@ func EffectiveWorkdir(cfg Config, img ImageConfig, containerName string) string 
 		return w
 	}
 	return "/var/www/discourse"
+}
+
+func defaultLocalProxyConfig() LocalProxyConfig {
+	return LocalProxyConfig{
+		ContainerName: "dv-local-proxy",
+		ImageTag:      "dv-local-proxy",
+		HTTPPort:      80,
+		APIPort:       2080,
+	}
+}
+
+func (c *LocalProxyConfig) ApplyDefaults() {
+	defaults := defaultLocalProxyConfig()
+	if strings.TrimSpace(c.ContainerName) == "" {
+		c.ContainerName = defaults.ContainerName
+	}
+	if strings.TrimSpace(c.ImageTag) == "" {
+		c.ImageTag = defaults.ImageTag
+	}
+	if c.HTTPPort == 0 {
+		c.HTTPPort = defaults.HTTPPort
+	}
+	if c.APIPort == 0 {
+		c.APIPort = defaults.APIPort
+	}
 }

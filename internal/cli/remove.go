@@ -8,6 +8,7 @@ import (
 
 	"dv/internal/config"
 	"dv/internal/docker"
+	"dv/internal/localproxy"
 	"dv/internal/xdg"
 )
 
@@ -43,6 +44,14 @@ var removeCmd = &cobra.Command{
 			name = currentAgentName(cfg)
 		}
 		imgForContainer := cfg.ContainerImages[name]
+		var proxyHost string
+		if cfg.LocalProxy.Enabled {
+			if labels, err := docker.Labels(name); err == nil {
+				if host, _, _, ok := localproxy.RouteFromLabels(labels); ok {
+					proxyHost = host
+				}
+			}
+		}
 
 		if docker.Exists(name) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Stopping and removing container '%s'...\n", name)
@@ -113,6 +122,12 @@ var removeCmd = &cobra.Command{
 		if dirty {
 			if err := config.Save(configDir, cfg); err != nil {
 				return err
+			}
+		}
+
+		if proxyHost != "" && localproxy.Running(cfg.LocalProxy) {
+			if err := localproxy.RemoveRoute(cfg.LocalProxy, proxyHost); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not remove %s from local proxy: %v\n", proxyHost, err)
 			}
 		}
 

@@ -8,6 +8,7 @@ import (
 
 	"dv/internal/config"
 	"dv/internal/docker"
+	"dv/internal/localproxy"
 	"dv/internal/xdg"
 )
 
@@ -42,6 +43,16 @@ var renameCmd = &cobra.Command{
 		if docker.Exists(newName) {
 			return fmt.Errorf("an agent named '%s' already exists", newName)
 		}
+		var proxyHost string
+		var targetPort int
+		if cfg.LocalProxy.Enabled {
+			if labels, err := docker.Labels(oldName); err == nil {
+				if host, port, _, ok := localproxy.RouteFromLabels(labels); ok {
+					proxyHost = host
+					targetPort = port
+				}
+			}
+		}
 		if err := docker.Rename(oldName, newName); err != nil {
 			return err
 		}
@@ -65,6 +76,20 @@ var renameCmd = &cobra.Command{
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Renamed agent '%s' -> '%s'\n", oldName, newName)
+
+		if proxyHost != "" {
+			newHost := localproxy.HostnameForContainer(newName)
+			_ = docker.UpdateLabels(newName, map[string]string{
+				localproxy.LabelHost: newHost,
+			})
+			if localproxy.Running(cfg.LocalProxy) && targetPort > 0 {
+				_ = localproxy.RemoveRoute(cfg.LocalProxy, proxyHost)
+				registerWithLocalProxy(cmd, cfg, newHost, targetPort)
+			}
+			if proxyHost != newHost {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Proxy hostname updated: %s -> %s. Restart with --reset if assets still point to the old name.\n", proxyHost, newHost)
+			}
+		}
 		return nil
 	},
 }
