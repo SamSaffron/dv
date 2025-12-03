@@ -93,10 +93,20 @@ func buildDiscourseResetScript(checkoutCmds []string) string {
 // buildPRCheckoutCommands generates git commands to fetch and checkout a PR.
 // It uses the actual branch name from GitHub to maintain branch identity.
 func buildPRCheckoutCommands(prNumber int, branchName string) []string {
+	refspec := fmt.Sprintf("+refs/pull/%d/head:refs/remotes/origin/pull/%d/head", prNumber, prNumber)
+	prRef := fmt.Sprintf("refs/pull/%d/head", prNumber)
+
 	return []string{
+		fmt.Sprintf("pr_branch=%s", shellQuote(branchName)),
+		fmt.Sprintf("pr_ref=%s", shellQuote(prRef)),
+		fmt.Sprintf("pr_refspec=%s", shellQuote(refspec)),
 		fmt.Sprintf("echo 'Fetching PR #%d (branch: %s) from origin...'", prNumber, branchName),
-		fmt.Sprintf("git fetch origin pull/%d/head", prNumber),
-		fmt.Sprintf("git checkout -B %s FETCH_HEAD", branchName),
+		"if ! git config --get-all remote.origin.fetch | grep -qxF \"$pr_refspec\"; then git config --add remote.origin.fetch \"$pr_refspec\"; fi",
+		"git fetch origin \"$pr_refspec\"",
+		fmt.Sprintf("git checkout -B \"$pr_branch\" origin/pull/%d/head", prNumber),
+		"git config branch.\"${pr_branch}\".remote origin",
+		"git config branch.\"${pr_branch}\".merge \"$pr_ref\"",
+		fmt.Sprintf("echo \"Branch ${pr_branch} now tracks origin/pull/%d/head for git pull.\"", prNumber),
 	}
 }
 
