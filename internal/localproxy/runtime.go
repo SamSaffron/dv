@@ -36,6 +36,8 @@ func EnsureContainer(cfg config.LocalProxyConfig, recreate bool) error {
 	}
 
 	if docker.Exists(name) {
+		// Ensure restart policy is set (best effort)
+		updateRestartPolicy(name)
 		if docker.Running(name) {
 			return nil
 		}
@@ -55,6 +57,7 @@ func EnsureContainer(cfg config.LocalProxyConfig, recreate bool) error {
 		"-p", fmt.Sprintf("%d:%d", cfg.HTTPPort, 80),
 		"-p", fmt.Sprintf("%d:%d", cfg.APIPort, 2080),
 		"--add-host", "host.docker.internal:host-gateway",
+		"--restart", "unless-stopped",
 		"--label", "com.dv.owner=dv",
 		"--label", LabelEnabled + "=true",
 		"--label", LabelHTTPPort + "=" + strconv.Itoa(cfg.HTTPPort),
@@ -68,4 +71,10 @@ func EnsureContainer(cfg config.LocalProxyConfig, recreate bool) error {
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+func updateRestartPolicy(name string) {
+	cmd := exec.Command("docker", "update", "--restart", "unless-stopped", name)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	_ = cmd.Run()
 }
