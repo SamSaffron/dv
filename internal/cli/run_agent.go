@@ -137,11 +137,22 @@ var runAgentCmd = &cobra.Command{
 
 		envs := buildAgentEnv(cfg, agentLower, cmd)
 
+		rawArgs := []string{}
 		rest := args[1:]
 
-		// If user provided "--" treat everything after as raw agent args (no prompt wrapping)
-		rawArgs := []string{}
-		if len(rest) > 0 {
+		// If user provided "--" treat everything after as raw agent args (no prompt wrapping).
+		// Cobra strips the literal "--" from args, so rely on ArgsLenAtDash to find the split.
+		if dash := cmd.ArgsLenAtDash(); dash >= 0 {
+			if dash < len(args) {
+				rawArgs = append(rawArgs, args[dash:]...)
+			}
+			if dash > 1 {
+				rest = args[1:dash]
+			} else {
+				rest = []string{}
+			}
+		} else if len(rest) > 0 {
+			// Fallback: honor an explicit "--" if flag parsing was disabled in the future.
 			for i, a := range rest {
 				if a == "--" {
 					rawArgs = append(rawArgs, rest[i+1:]...)
