@@ -58,7 +58,8 @@ func (c *Client) SetSiteSetting(name string, value interface{}) error {
 		return err
 	}
 
-	if resp.StatusCode != 200 {
+	// Accept 200 OK and 204 No Content as success
+	if resp.StatusCode != 200 && resp.StatusCode != 204 {
 		return fmt.Errorf("set setting %s: status %d: %s", name, resp.StatusCode, string(body))
 	}
 

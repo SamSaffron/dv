@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -477,14 +478,37 @@ func (m *aiConfigModel) resize() {
 	if m.mode == modeLoading {
 		return
 	}
-	bodyHeight := max(10, m.height-8)
-	detailHeight := 7
-	listHeight := bodyHeight - detailHeight
-	// Always use 50% width for each pane
-	leftWidth := m.width / 2
-	rightWidth := m.width / 2
-	m.llmList.SetSize(leftWidth, listHeight)
-	m.modelList.SetSize(rightWidth, listHeight)
+
+	// Compact layout for small screens (stacked), side-by-side for larger
+	isCompact := m.width < 80
+
+	if isCompact {
+		// Stacked layout - full width, split height
+		headerHeight := 3 // Status line
+		footerHeight := 4 // Detail + help
+		availHeight := m.height - headerHeight - footerHeight
+		listHeight := availHeight / 2
+		if listHeight < 5 {
+			listHeight = 5
+		}
+		listWidth := m.width - 4
+		m.llmList.SetSize(listWidth, listHeight)
+		m.modelList.SetSize(listWidth, listHeight)
+	} else {
+		// Side-by-side layout
+		bodyHeight := max(10, m.height-8)
+		detailHeight := 5
+		listHeight := bodyHeight - detailHeight
+		// Use proportional width
+		leftWidth := (m.width - 4) / 2
+		rightWidth := (m.width - 4) / 2
+		m.llmList.SetSize(leftWidth, listHeight)
+		m.modelList.SetSize(rightWidth, listHeight)
+	}
+}
+
+func (m aiConfigModel) isCompactLayout() bool {
+	return m.width < 80
 }
 
 func (m *aiConfigModel) updateLists() {
@@ -500,42 +524,102 @@ func (m aiConfigModel) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
+
+	isCompact := m.isCompactLayout()
+
+	// Styles
+	activeBorder := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("39"))
+	inactiveBorder := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+
 	left := m.llmList.View()
 	right := m.modelList.View()
+
 	if m.focus == focusConfigured {
-		left = lipgloss.NewStyle().Border(lipgloss.ThickBorder(), true).BorderForeground(lipgloss.Color("39")).Render(left)
-		right = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Render(right)
+		left = activeBorder.Render(left)
+		right = inactiveBorder.Render(right)
 	} else {
-		right = lipgloss.NewStyle().Border(lipgloss.ThickBorder(), true).BorderForeground(lipgloss.Color("39")).Render(right)
-		left = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Render(left)
+		right = activeBorder.Render(right)
+		left = inactiveBorder.Render(left)
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, lipgloss.NewStyle().Width(2).Render(""), right)
+
+	var body string
+	if isCompact {
+		// Stacked layout with tab-like headers
+		tabStyle := lipgloss.NewStyle().Padding(0, 1)
+		activeTab := tabStyle.Foreground(lipgloss.Color("39")).Bold(true)
+		inactiveTab := tabStyle.Foreground(lipgloss.Color("243"))
+
+		var tabs string
+		if m.focus == focusConfigured {
+			tabs = activeTab.Render("▸ Configured") + "  " + inactiveTab.Render("Catalog")
+		} else {
+			tabs = inactiveTab.Render("Configured") + "  " + activeTab.Render("▸ Catalog")
+		}
+
+		// Show only the focused pane in compact mode
+		if m.focus == focusConfigured {
+			body = tabs + "\n" + left
+		} else {
+			body = tabs + "\n" + right
+		}
+	} else {
+		// Side-by-side layout
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+	}
 
 	status := m.renderStatusLine()
 	detail := m.renderDetail()
-	toast := ""
+
+	// Toast and error messages
+	var messages []string
 	if m.toast != "" {
-		toast = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render(m.toast)
+		toastStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+		messages = append(messages, toastStyle.Render(m.toast))
 	}
-	errLine := ""
 	if m.errMsg != "" {
-		// Wrap error message to fit screen width
-		wrappedErr := lipgloss.NewStyle().Width(m.width - 4).Render(m.errMsg)
-		errLine = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(wrappedErr)
+		errStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("203")).
+			Width(m.width - 4)
+		messages = append(messages, errStyle.Render(m.errMsg))
 	}
-	busy := ""
+
+	// Busy indicator
+	var busyLine string
 	if m.busy {
 		busyMsg := "Working..."
 		if m.busyMessage != "" {
 			busyMsg = m.busyMessage
 		}
-		busy = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(m.spinner.View() + " " + busyMsg)
+		busyLine = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(m.spinner.View() + " " + busyMsg)
 	}
 
-	view := fmt.Sprintf("%s\n%s\n\n%s\n%s\n%s", status, body, detail, toast, errLine)
-	if busy != "" {
-		view = busy + "\n" + view
+	// Build help line (compact on small screens)
+	var helpLine string
+	if isCompact {
+		helpLine = dimStyle.Render("Tab:switch  Enter:select  e:edit  d:del  q:quit")
+	} else {
+		helpLine = dimStyle.Render("Tab/←→:switch panes  Enter:select/default  e:edit  d:delete  r:refresh  q:quit")
 	}
+
+	// Assemble view
+	var parts []string
+	if busyLine != "" {
+		parts = append(parts, busyLine)
+	}
+	parts = append(parts, status)
+	parts = append(parts, body)
+	if detail != "" {
+		parts = append(parts, detail)
+	}
+	parts = append(parts, helpLine)
+	parts = append(parts, messages...)
+
+	view := strings.Join(parts, "\n")
 
 	switch m.mode {
 	case modeLoading:
@@ -546,6 +630,19 @@ func (m aiConfigModel) View() string {
 		return m.renderTestingModal()
 	case modeCreate:
 		if m.form != nil {
+			// Set form size based on available space
+			formWidth := m.width - 4
+			if formWidth > 100 {
+				formWidth = 100
+			}
+			if formWidth < 40 {
+				formWidth = 40
+			}
+			formHeight := m.height - 4
+			if formHeight < 20 {
+				formHeight = 20
+			}
+			m.form.setSize(formWidth, formHeight)
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.form.View(), lipgloss.WithWhitespaceChars("░"), lipgloss.WithWhitespaceForeground(lipgloss.Color("8")))
 		}
 	case modeConfirmDelete:
@@ -562,44 +659,85 @@ func (m aiConfigModel) renderStatusLine() string {
 			break
 		}
 	}
-	keyParts := []string{}
-	for _, entry := range []struct {
+
+	isCompact := m.isCompactLayout()
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	activeKeyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	inactiveKeyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
+	providers := []struct {
 		Label string
+		Short string
 		Keys  []string
 	}{
-		{"OpenAI", []string{"OPENAI_API_KEY"}},
-		{"Anthropic", []string{"ANTHROPIC_API_KEY"}},
-		{"OpenRouter", []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY"}},
-		{"Groq", []string{"GROQ_API_KEY"}},
-		{"Gemini", []string{"GEMINI_API_KEY"}},
-		{"GitHub", []string{"GH_TOKEN"}},
-		{"Bedrock", []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}},
-	} {
+		{"OpenAI", "OAI", []string{"OPENAI_API_KEY"}},
+		{"Anthropic", "ANT", []string{"ANTHROPIC_API_KEY"}},
+		{"OpenRouter", "OR", []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY"}},
+		{"Groq", "GRQ", []string{"GROQ_API_KEY"}},
+		{"Gemini", "GEM", []string{"GEMINI_API_KEY"}},
+		{"GitHub", "GH", []string{"GH_TOKEN"}},
+		{"Bedrock", "AWS", []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}},
+	}
+
+	var keyParts []string
+	for _, entry := range providers {
 		val := firstNonEmpty(m.env, entry.Keys...)
+		label := entry.Label
+		if isCompact {
+			label = entry.Short
+		}
 		if val != "" {
-			keyParts = append(keyParts, fmt.Sprintf("%s ✓", entry.Label))
+			keyParts = append(keyParts, activeKeyStyle.Render(label+"✓"))
 		} else {
-			keyParts = append(keyParts, fmt.Sprintf("%s ·", entry.Label))
+			keyParts = append(keyParts, inactiveKeyStyle.Render(label+"·"))
 		}
 	}
-	role := fmt.Sprintf("Container: %s  Default: %s", m.container, defaultName)
-	return fmt.Sprintf("%s\nKeys: %s", role, strings.Join(keyParts, "  "))
+
+	if isCompact {
+		// Compact single-line format
+		return labelStyle.Render(m.container) + " " + dimStyle.Render("default:") + " " + defaultName + "\n" +
+			dimStyle.Render("Keys: ") + strings.Join(keyParts, " ")
+	}
+
+	// Full format
+	role := labelStyle.Render("Container: ") + m.container + "  " +
+		labelStyle.Render("Default: ") + defaultName
+	return role + "\n" + dimStyle.Render("Keys: ") + strings.Join(keyParts, "  ")
 }
 
 func (m aiConfigModel) renderDetail() string {
 	item, ok := m.llmList.SelectedItem().(llmItem)
 	if !ok {
-		return "Select a model to see details."
+		return ""
 	}
 	llm := item.model
-	lines := []string{
-		fmt.Sprintf("%s (%s)", llm.DisplayName, llm.Name),
-		fmt.Sprintf("Provider: %s  Tokenizer: %s", llm.Provider, shortTokenizer(llm.Tokenizer)),
-		fmt.Sprintf("Prompt tokens: %d  Output tokens: %d", llm.MaxPromptTokens, llm.MaxOutputTokens),
-		fmt.Sprintf("Pricing ($/1M): input %.4f cached %.4f output %.4f", llm.InputCost, llm.CachedInputCost, llm.OutputCost),
-		fmt.Sprintf("Endpoint: %s", llm.URL),
-		fmt.Sprintf("Used by: %s", joinUsage(llm.UsedBy)),
+	isCompact := m.isCompactLayout()
+
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
+	if isCompact {
+		// Ultra-compact single-line detail
+		return dimStyle.Render("─ ") +
+			llm.DisplayName + " " +
+			dimStyle.Render("·") + " " +
+			llm.Provider + " " +
+			dimStyle.Render(fmt.Sprintf("$%.2f/$%.2f", llm.InputCost, llm.OutputCost))
 	}
+
+	// Full detail view
+	lines := []string{
+		labelStyle.Render(llm.DisplayName) + dimStyle.Render(" ("+llm.Name+")"),
+		dimStyle.Render("Provider: ") + llm.Provider + "  " + dimStyle.Render("Tokenizer: ") + shortTokenizer(llm.Tokenizer),
+		dimStyle.Render("Tokens: ") + fmt.Sprintf("%d/%d", llm.MaxPromptTokens, llm.MaxOutputTokens) +
+			"  " + dimStyle.Render("Pricing: ") + fmt.Sprintf("$%.4f/$%.4f/$%.4f", llm.InputCost, llm.CachedInputCost, llm.OutputCost),
+	}
+
+	if len(llm.UsedBy) > 0 {
+		lines = append(lines, dimStyle.Render("Used by: ")+joinUsage(llm.UsedBy))
+	}
+
 	return lipgloss.NewStyle().Width(m.width).Render(strings.Join(lines, "\n"))
 }
 
@@ -691,47 +829,68 @@ func (m aiConfigModel) renderDeleteModal() string {
 	if m.deleteLLM != nil {
 		name = m.deleteLLM.DisplayName
 	}
-	content := fmt.Sprintf("Delete %s?\n\nThis removes the LLM from Discourse. Features using it will stop until reassigned.\n\nPress Y to delete or N to cancel.", name)
+
+	// Responsive width
+	modalWidth := m.width - 8
+	if modalWidth > 60 {
+		modalWidth = 60
+	}
+	if modalWidth < 30 {
+		modalWidth = 30
+	}
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("203"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
+	var content string
+	if m.width < 60 {
+		// Compact version
+		content = titleStyle.Render("Delete "+name+"?") + "\n\n" +
+			dimStyle.Render("LLM will be removed.") + "\n\n" +
+			keyStyle.Render("Y") + " delete  " + keyStyle.Render("N") + " cancel"
+	} else {
+		content = titleStyle.Render("Delete "+name+"?") + "\n\n" +
+			dimStyle.Render("This removes the LLM from Discourse.\nFeatures using it will stop until reassigned.") + "\n\n" +
+			keyStyle.Render("Y") + " to delete  " + keyStyle.Render("N") + " to cancel"
+	}
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("203")).
 		Padding(1, 2).
-		Width(80).
+		Width(modalWidth).
 		Render(content)
 }
 
 func (m aiConfigModel) renderSavingModal() string {
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("39")).
-		Padding(0, 0, 1, 0)
+	// Responsive width
+	modalWidth := m.width - 8
+	if modalWidth > 50 {
+		modalWidth = 50
+	}
+	if modalWidth < 30 {
+		modalWidth = 30
+	}
 
-	spinnerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39"))
+	spinnerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 
-	messageStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("246")).
-		Padding(1, 0)
-
-	message := "Saving configuration..."
+	message := "Saving..."
 	if m.savingMessage != "" {
 		message = m.savingMessage
 	}
 
-	lines := []string{
-		titleStyle.Render("💾 Saving Configuration"),
-		"",
-		spinnerStyle.Render(m.spinner.View() + " " + message),
-		"",
-		messageStyle.Render("This may take a moment..."),
-	}
+	content := spinnerStyle.Render(m.spinner.View()+" "+message) + "\n" +
+		dimStyle.Render("Please wait...")
 
-	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("39")).
-		Padding(2, 4).
-		Width(60)
+		Padding(1, 2).
+		Width(modalWidth)
 
 	return lipgloss.Place(
 		m.width,
@@ -745,86 +904,63 @@ func (m aiConfigModel) renderSavingModal() string {
 }
 
 func (m aiConfigModel) renderTestingModal() string {
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("39")).
-		Padding(0, 0, 1, 0)
-
-	spinnerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39"))
-
-	successStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("42")).
-		Bold(true).
-		Padding(0, 2)
-
-	errorTitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("203")).
-		Bold(true)
-
-	errorMsgStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("203")).
-		Background(lipgloss.Color("52")).
-		Padding(1, 2).
-		Width(70 - 4) // Account for padding
-
-	messageStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("246"))
-
-	lines := []string{
-		titleStyle.Render("🧪 Testing LLM Connection"),
-		"",
+	// Responsive width
+	modalWidth := m.width - 8
+	if modalWidth > 60 {
+		modalWidth = 60
 	}
+	if modalWidth < 35 {
+		modalWidth = 35
+	}
+	contentWidth := modalWidth - 6
+
+	spinnerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
+	var lines []string
 
 	if m.testResult == "" {
 		// Still testing
-		message := "Testing connection..."
+		message := "Testing..."
 		if m.testingMessage != "" {
 			message = m.testingMessage
 		}
-		lines = append(lines,
-			spinnerStyle.Render(m.spinner.View()+" "+message),
-			"",
-			messageStyle.Render("Sending test request to API..."),
-			"",
-			messageStyle.Render("This may take a few seconds..."),
-		)
+		lines = []string{
+			spinnerStyle.Render(m.spinner.View() + " " + message),
+			dimStyle.Render("Sending request to API..."),
+		}
 	} else if m.testResult == "success" {
-		// Success!
-		lines = append(lines,
+		lines = []string{
+			successStyle.Render("✓ Test Passed"),
 			"",
-			successStyle.Render("✅  TEST PASSED  ✅"),
+			dimStyle.Render("Connection verified."),
 			"",
-			"",
-			messageStyle.Render("Connection verified successfully."),
-			messageStyle.Render("The API responded correctly."),
-			"",
-			"",
-			messageStyle.Render("Press Enter to continue"),
-		)
+			keyStyle.Render("Enter") + " to continue",
+		}
 	} else {
-		// Failed - make error VERY visible
-		// Wrap the error message to fit within the box width
-		errorWidth := 70 - 8 // Box width minus padding
-		wrappedError := lipgloss.NewStyle().Width(errorWidth).Render(m.testError)
-		lines = append(lines,
+		// Failed
+		wrappedError := lipgloss.NewStyle().Width(contentWidth).Render(m.testError)
+		lines = []string{
+			errorStyle.Render("✗ Test Failed"),
 			"",
-			errorTitleStyle.Render("❌  TEST FAILED  ❌"),
+			lipgloss.NewStyle().
+				Foreground(lipgloss.Color("203")).
+				Width(contentWidth).
+				Render(wrappedError),
 			"",
-			"",
-			errorMsgStyle.Render(wrappedError),
-			"",
-			"",
-			messageStyle.Render("Press Enter to return to form"),
-		)
+			keyStyle.Render("Enter") + " to return",
+		}
 	}
 
 	content := strings.Join(lines, "\n")
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("39")).
-		Padding(2, 4).
-		Width(70)
+		Padding(1, 2).
+		Width(modalWidth)
 
 	return lipgloss.Place(
 		m.width,
@@ -944,6 +1080,10 @@ type createForm struct {
 	mode        formMode
 	editingID   int64
 	testSuccess bool
+	viewport    viewport.Model
+	width       int
+	height      int
+	ready       bool
 }
 
 func newCreateForm(entryID string, model ai.ProviderModel, meta ai.LLMMetadata, env map[string]string) *createForm {
@@ -979,10 +1119,12 @@ func newCreateForm(entryID string, model ai.ProviderModel, meta ai.LLMMetadata, 
 		}
 	}
 	fields = append(fields, buildProviderParamFields(providerKey, meta, nil, defaults)...)
+	vp := viewport.New(0, 0)
 	f := &createForm{
-		entryID: entryID,
-		fields:  fields,
-		mode:    formModeCreate,
+		entryID:  entryID,
+		fields:   fields,
+		mode:     formModeCreate,
+		viewport: vp,
 	}
 	f.updateFocus()
 	return f
@@ -1006,11 +1148,13 @@ func newEditForm(llm ai.LLMModel, meta ai.LLMMetadata, isDefault bool) *createFo
 		newBoolField("vision_enabled", "Enable vision", llm.VisionEnabled),
 	}
 	fields = append(fields, buildProviderParamFields(llm.Provider, meta, llm.ProviderParams, nil)...)
+	vp := viewport.New(0, 0)
 	f := &createForm{
 		fields:    fields,
 		entryID:   providerSlug(llm.Provider),
 		mode:      formModeEdit,
 		editingID: llm.ID,
+		viewport:  vp,
 	}
 	fields[5].Model.Placeholder = "Leave blank to keep current key"
 	f.updateFocus()
@@ -1105,47 +1249,202 @@ func (f *createForm) currentField() *formField {
 	return f.fields[f.focusIndex]
 }
 
+func (f *createForm) setSize(width, height int) {
+	f.width = width
+	f.height = height
+	// Calculate content width (leave space for border/padding)
+	contentWidth := width - 6 // 2 for border, 4 for padding
+	if contentWidth < 30 {
+		contentWidth = 30
+	}
+	// Leave space for title, footer, and padding
+	viewportHeight := height - 10
+	if viewportHeight < 5 {
+		viewportHeight = 5
+	}
+	f.viewport.Width = contentWidth
+	f.viewport.Height = viewportHeight
+	// Update text input widths
+	for _, field := range f.fields {
+		if field.Kind == fieldInput {
+			field.Model.Width = contentWidth - 4
+		}
+	}
+	f.ready = true
+}
+
+func (f *createForm) ensureVisible() {
+	if !f.ready || f.viewport.Height <= 0 {
+		return
+	}
+	// Calculate the approximate line position of the focused field
+	linePos := 0
+	for i := 0; i < f.focusIndex && i < len(f.fields); i++ {
+		linePos += 3 // Each field takes roughly 3 lines
+	}
+	// Scroll to keep the focused field visible
+	viewTop := f.viewport.YOffset
+	viewBottom := viewTop + f.viewport.Height
+	fieldTop := linePos
+	fieldBottom := linePos + 3
+
+	if fieldTop < viewTop {
+		f.viewport.SetYOffset(fieldTop)
+	} else if fieldBottom > viewBottom {
+		f.viewport.SetYOffset(fieldBottom - f.viewport.Height)
+	}
+}
+
 func (f *createForm) View() string {
+	// Determine effective width
+	boxWidth := f.width
+	if boxWidth <= 0 {
+		boxWidth = 80
+	}
+	if boxWidth > 100 {
+		boxWidth = 100 // Cap max width for readability
+	}
+	contentWidth := boxWidth - 6 // Account for border and padding
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("39")).
+		Width(contentWidth)
+
 	title := "Configure New LLM"
 	if f.mode == formModeEdit {
 		title = fmt.Sprintf("Edit %s", f.value("display_name"))
 	}
-	lines := []string{title, ""}
+
+	// Build field content
+	var fieldLines []string
+	focusedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("39")).
+		Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	selectedValueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+
 	for i, field := range f.fields {
 		var rendered string
+		isFocused := i == f.focusIndex
+
 		switch field.Kind {
 		case fieldInput:
-			rendered = fmt.Sprintf("%s:\n%s", field.Label, field.Model.View())
+			labelStyle := dimStyle
+			if isFocused {
+				labelStyle = focusedStyle
+			}
+			rendered = labelStyle.Render(field.Label+":") + "\n" + field.Model.View()
 		case fieldBool:
 			box := "[ ]"
+			boxStyle := dimStyle
 			if field.BoolValue {
 				box = "[x]"
+				boxStyle = selectedValueStyle
 			}
-			rendered = fmt.Sprintf("%s %s", box, field.Label)
+			labelStyle := dimStyle
+			if isFocused {
+				labelStyle = focusedStyle
+				boxStyle = focusedStyle
+			}
+			rendered = boxStyle.Render(box) + " " + labelStyle.Render(field.Label)
 		case fieldSelect:
-			opts := strings.Join(field.SelectValues, " | ")
-			selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-			rendered = fmt.Sprintf("%s: %s\nOptions: %s", field.Label, selectedStyle.Render(field.SelectValue), opts)
+			labelStyle := dimStyle
+			if isFocused {
+				labelStyle = focusedStyle
+			}
+			// Show current value prominently
+			rendered = labelStyle.Render(field.Label+": ") + selectedValueStyle.Render(field.SelectValue)
+			if isFocused && len(field.SelectValues) > 1 {
+				// Show options in a compact format on narrow screens
+				var optParts []string
+				for _, opt := range field.SelectValues {
+					if opt == field.SelectValue {
+						optParts = append(optParts, selectedValueStyle.Render(opt))
+					} else {
+						optParts = append(optParts, dimStyle.Render(opt))
+					}
+				}
+				rendered += "\n" + dimStyle.Render("  ") + strings.Join(optParts, dimStyle.Render(" | "))
+			}
 		}
-		if i == f.focusIndex {
-			rendered = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(rendered)
+
+		if isFocused {
+			// Add a subtle indicator
+			rendered = "▸ " + rendered
+		} else {
+			rendered = "  " + rendered
 		}
-		lines = append(lines, rendered, "")
+		fieldLines = append(fieldLines, rendered)
 	}
-	lines = append(lines,
-		"[Space] toggle/cycle · Tab to move · Shift+Tab to go back",
-		"Enter to save · Esc to cancel · Ctrl+T to test",
-	)
+
+	// Build footer with keyboard hints
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Italic(true)
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+
+	// Adaptive help text based on width
+	var helpText string
+	if contentWidth < 50 {
+		// Compact hints for small screens
+		helpText = keyStyle.Render("Tab") + " move " + keyStyle.Render("Space") + " toggle " + keyStyle.Render("Enter") + " save"
+	} else {
+		helpText = keyStyle.Render("Tab/Shift+Tab") + " navigate  " +
+			keyStyle.Render("Space") + " toggle  " +
+			keyStyle.Render("Ctrl+T") + " test  " +
+			keyStyle.Render("Enter") + " save  " +
+			keyStyle.Render("Esc") + " cancel"
+	}
+
+	// Status messages
+	var statusLine string
 	if f.testSuccess {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true).Render("✅ Test passed! You can now save the configuration."))
+		statusLine = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("42")).
+			Bold(true).
+			Render("✓ Test passed")
 	}
 	if f.err != "" {
-		// Wrap form error to fit within box width (80 - 4 for padding)
-		wrappedFormErr := lipgloss.NewStyle().Width(76).Render(f.err)
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(wrappedFormErr))
+		errStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("203")).
+			Width(contentWidth)
+		statusLine = errStyle.Render(f.err)
 	}
-	box := lipgloss.NewStyle().Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Width(80)
-	return box.Render(strings.Join(lines, "\n"))
+
+	// Build the complete view
+	content := strings.Join(fieldLines, "\n")
+
+	// Use viewport for scrolling if content is tall
+	if f.ready && f.viewport.Height > 0 {
+		f.viewport.SetContent(content)
+		f.ensureVisible()
+		content = f.viewport.View()
+
+		// Show scroll indicator
+		if f.viewport.TotalLineCount() > f.viewport.Height {
+			scrollPct := float64(f.viewport.YOffset) / float64(f.viewport.TotalLineCount()-f.viewport.Height) * 100
+			scrollIndicator := dimStyle.Render(fmt.Sprintf("─ %.0f%% ─", scrollPct))
+			content += "\n" + scrollIndicator
+		}
+	}
+
+	// Assemble final view
+	var sections []string
+	sections = append(sections, titleStyle.Render(title))
+	sections = append(sections, "")
+	sections = append(sections, content)
+	sections = append(sections, "")
+	sections = append(sections, hintStyle.Render(helpText))
+	if statusLine != "" {
+		sections = append(sections, statusLine)
+	}
+
+	box := lipgloss.NewStyle().
+		Padding(1, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("39")).
+		Width(boxWidth)
+
+	return box.Render(strings.Join(sections, "\n"))
 }
 
 func (f *createForm) payload() (discourse.CreateLLMInput, error) {
@@ -1513,28 +1812,27 @@ func max(a, b int) int {
 }
 
 func (m aiConfigModel) renderLoadingScreen() string {
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("39")).
-		Padding(1, 0)
+	// Responsive width
+	modalWidth := m.width - 8
+	if modalWidth > 50 {
+		modalWidth = 50
+	}
+	if modalWidth < 30 {
+		modalWidth = 30
+	}
 
-	spinnerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39"))
-
-	progressStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("246")).
-		PaddingLeft(2)
+	spinnerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 
 	lines := []string{
-		titleStyle.Render("🚀 Discourse AI Configuration"),
-		"",
-		spinnerStyle.Render(m.spinner.View() + " Initializing..."),
-		"",
+		spinnerStyle.Render(m.spinner.View() + " Loading AI Config..."),
 	}
 
 	if len(m.loadingProgress) > 0 {
+		lines = append(lines, "")
 		for _, step := range m.loadingProgress {
-			lines = append(lines, progressStyle.Render("✓ "+step))
+			lines = append(lines, checkStyle.Render("✓")+" "+dimStyle.Render(step))
 		}
 	}
 
@@ -1542,8 +1840,8 @@ func (m aiConfigModel) renderLoadingScreen() string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("39")).
-		Padding(2, 4).
-		Width(60)
+		Padding(1, 2).
+		Width(modalWidth)
 
 	return lipgloss.Place(
 		m.width,
