@@ -16,8 +16,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"dv/internal/ai"
-	"dv/internal/ai/discourse"
 	"dv/internal/ai/providers"
+	"dv/internal/discourse"
 	"dv/internal/huh"
 )
 
@@ -42,7 +42,7 @@ const (
 type aiConfigOptions struct {
 	state        ai.LLMState
 	catalog      ai.ProviderCatalog
-	client       *discourse.Client
+	client       discourse.DiscourseClient
 	env          map[string]string
 	container    string
 	discourseDir string
@@ -53,7 +53,7 @@ type aiConfigOptions struct {
 
 type aiConfigModel struct {
 	ctx             context.Context
-	client          *discourse.Client
+	client          discourse.DiscourseClient
 	container       string
 	workdir         string
 	env             map[string]string
@@ -630,7 +630,7 @@ func (m aiConfigModel) setDefaultCmd(id int64, name string) tea.Cmd {
 	}
 }
 
-func (m aiConfigModel) createModelCmd(payload discourse.CreateModelInput) tea.Cmd {
+func (m aiConfigModel) createModelCmd(payload discourse.CreateLLMInput) tea.Cmd {
 	client := m.client
 	ctx := m.ctx
 	return func() tea.Msg {
@@ -645,7 +645,7 @@ func (m aiConfigModel) createModelCmd(payload discourse.CreateModelInput) tea.Cm
 	}
 }
 
-func (m aiConfigModel) testModelCmd(payload discourse.CreateModelInput) tea.Cmd {
+func (m aiConfigModel) testModelCmd(payload discourse.CreateLLMInput) tea.Cmd {
 	client := m.client
 	ctx := m.ctx
 	return func() tea.Msg {
@@ -656,7 +656,7 @@ func (m aiConfigModel) testModelCmd(payload discourse.CreateModelInput) tea.Cmd 
 	}
 }
 
-func (m aiConfigModel) updateModelCmd(id int64, payload discourse.CreateModelInput) tea.Cmd {
+func (m aiConfigModel) updateModelCmd(id int64, payload discourse.CreateLLMInput) tea.Cmd {
 	client := m.client
 	ctx := m.ctx
 	return func() tea.Msg {
@@ -1148,8 +1148,8 @@ func (f *createForm) View() string {
 	return box.Render(strings.Join(lines, "\n"))
 }
 
-func (f *createForm) payload() (discourse.CreateModelInput, error) {
-	var payload discourse.CreateModelInput
+func (f *createForm) payload() (discourse.CreateLLMInput, error) {
+	var payload discourse.CreateLLMInput
 	if f.isEdit() {
 		payload.ExistingID = f.targetID()
 	}

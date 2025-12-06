@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"dv/internal/config"
+	"dv/internal/discourse"
 	"dv/internal/docker"
 	"dv/internal/xdg"
 )
@@ -208,25 +208,18 @@ func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, en
 		adminUsername = strings.TrimSpace(existingUsername)
 	}
 	if apiKey == "" || adminUsername == "" {
-		fmt.Fprintln(cmd.OutOrStdout(), "Generating (or reusing) Discourse API key for admin user inside container...")
-		railsScript := `admin = User.where(admin: true).first; raise "No admin user found" if admin.nil?; key = ApiKey.find_by(description: "` + apiKeyDescription + `") || ApiKey.create!(description: "` + apiKeyDescription + `", created_by_id: admin.id, user_id: admin.id); puts key.key; puts admin.username`
-		keyOut, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "bin/rails runner '" + railsScript + "'"})
+		fmt.Fprintln(cmd.OutOrStdout(), "Generating Discourse API key for admin user inside container...")
+		generated, err := discourse.GenerateAPIKey(discourse.GenerateAPIKeyOptions{
+			ContainerName: containerName,
+			Workdir:       workdir,
+			Description:   apiKeyDescription,
+			Verbose:       false,
+		})
 		if err != nil {
-			return fmt.Errorf("failed to create Discourse API key: %w\nOutput: %s", err, keyOut)
+			return fmt.Errorf("failed to create Discourse API key: %w", err)
 		}
-		lines := strings.Split(strings.TrimSpace(keyOut), "\n")
-		if len(lines) < 2 {
-			return fmt.Errorf("expected API key and username from rails runner, got: %s", keyOut)
-		}
-		apiKey = strings.TrimSpace(lines[len(lines)-2])
-		adminUsername = strings.TrimSpace(lines[len(lines)-1])
-		keyRe := regexp.MustCompile(`^[0-9a-f]{32,64}$`)
-		if !keyRe.MatchString(apiKey) {
-			return fmt.Errorf("unexpected API key format: %q", apiKey)
-		}
-		if adminUsername == "" {
-			return fmt.Errorf("received empty admin username from rails runner")
-		}
+		apiKey = generated.Key
+		adminUsername = generated.Username
 	} else {
 		fmt.Fprintln(cmd.OutOrStdout(), "Reusing existing Discourse API key for admin user from MCP profile.")
 	}

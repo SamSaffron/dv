@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"dv/internal/ai/discourse"
 	"dv/internal/config"
+	"dv/internal/discourse"
 	"dv/internal/docker"
 	"dv/internal/xdg"
 )
@@ -119,7 +119,10 @@ configuring new models, and are passed to the container when testing connections
 		}
 
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		client := discourse.NewClient(containerName, discourseRoot, verbose)
+		client, err := discourse.NewClientWrapper(containerName, cfg, verbose)
+		if err != nil {
+			return fmt.Errorf("create discourse client: %w", err)
+		}
 
 		cacheDir, err := xdg.CacheDir()
 		if err != nil {

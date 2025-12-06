@@ -10,23 +10,21 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"dv/internal/config"
+	"dv/internal/discourse"
 	"dv/internal/docker"
 	"dv/internal/resources"
 	"dv/internal/xdg"
 )
 
 const (
-	themeWatcherScriptPath   = "/usr/local/bin/dv_theme_watcher.rb"
-	themeAPIKeyDir           = "/home/discourse/.dv/theme_api_keys"
-	themeAPIKeyRetryAttempts = 7
-	themeAPIKeyRetryDelay    = 5 * time.Second
+	themeWatcherScriptPath = "/usr/local/bin/dv_theme_watcher.rb"
+	themeAPIKeyDir         = "/home/discourse/.dv/theme_api_keys"
 )
 
 type themeCommandContext struct {
@@ -634,80 +632,21 @@ func ensureThemeWatcherScript(cmd *cobra.Command, ctx themeCommandContext) error
 
 func ensureThemeAPIKey(cmd *cobra.Command, ctx themeCommandContext, slug string) (string, string, error) {
 	keyPath := themeKeyPath(slug)
-	readCmd := fmt.Sprintf("if [ -f %s ]; then cat %s; fi", shellQuote(keyPath), shellQuote(keyPath))
-	ctx.verboseLog(cmd, "Checking for cached API key at %s", keyPath)
-	out, err := docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", readCmd})
+	description := fmt.Sprintf("theme-watch-%s", slug)
+
+	ctx.verboseLog(cmd, "Ensuring API key for theme %s at %s", slug, keyPath)
+
+	key, _, err := discourse.EnsureAPIKeyForService(
+		ctx.containerName,
+		ctx.discourseRoot,
+		description,
+		keyPath,
+		ctx.verbose,
+	)
 	if err != nil {
 		return "", "", err
 	}
-	trimmed := strings.TrimSpace(out)
-	if trimmed != "" {
-		ctx.verboseLog(cmd, "Found existing API key")
-		return trimmed, keyPath, nil
-	}
-	desc := fmt.Sprintf("theme-watch-%s", slug)
-	rubyScript := fmt.Sprintf(`desc = %s
-user = User.where(admin: true).order(:id).first
-raise "No admin user found" unless user
-api_key = ApiKey.where(user: user, description: desc, revoked_at: nil).order(created_at: :desc).first
-api_key ||= ApiKey.create!(user: user, description: desc)
-STDOUT.sync = true
-puts api_key.key
-`, strconv.Quote(desc))
 
-	tmpFile, err := os.CreateTemp("", "dv-theme-key-*.rb")
-	if err != nil {
-		return "", "", err
-	}
-	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
-	}()
-	if _, err := tmpFile.WriteString(rubyScript); err != nil {
-		return "", "", err
-	}
-	if err := tmpFile.Close(); err != nil {
-		return "", "", err
-	}
-
-	scriptName := filepath.Base(tmpFile.Name())
-	containerScriptPath := path.Join("/tmp", scriptName)
-	if err := docker.CopyToContainerWithOwnership(ctx.containerName, tmpFile.Name(), containerScriptPath, false); err != nil {
-		return "", "", err
-	}
-	if _, err := docker.ExecAsRoot(ctx.containerName, "/", []string{"chmod", "755", containerScriptPath}); err != nil {
-		return "", "", err
-	}
-	defer docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", fmt.Sprintf("rm -f %s", shellQuote(containerScriptPath))})
-
-	runnerCmd := fmt.Sprintf("cd %s && RAILS_ENV=development bundle exec rails runner %s", shellQuote(ctx.discourseRoot), shellQuote(containerScriptPath))
-	var key string
-	var runnerOut string
-	var runnerErr error
-	for attempt := 1; attempt <= themeAPIKeyRetryAttempts; attempt++ {
-		ctx.verboseLog(cmd, "Generating new API key (attempt %d/%d): %s", attempt, themeAPIKeyRetryAttempts, runnerCmd)
-		runnerOut, runnerErr = docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", runnerCmd})
-		if runnerErr == nil {
-			key = lastNonEmptyLine(runnerOut)
-			if key != "" {
-				break
-			}
-			runnerErr = errors.New("rails runner returned empty key output")
-		} else if trimmed := strings.TrimSpace(runnerOut); trimmed != "" {
-			ctx.verboseLog(cmd, "Command output:\n%s", trimmed)
-		}
-		if attempt == themeAPIKeyRetryAttempts {
-			return "", "", fmt.Errorf("failed to create API key after %d attempts: %w", themeAPIKeyRetryAttempts, runnerErr)
-		}
-		ctx.verboseLog(cmd, "Theme API key generation not ready (%v); retrying in %s", runnerErr, themeAPIKeyRetryDelay)
-		time.Sleep(themeAPIKeyRetryDelay)
-	}
-
-	saveCmd := fmt.Sprintf("set -euo pipefail; install -d -m 700 %s; printf '%%s\\n' %s > %s && chmod 600 %s", shellQuote(path.Dir(keyPath)), shellQuote(key), shellQuote(keyPath), shellQuote(keyPath))
-	ctx.verboseLog(cmd, "Saving API key via: %s", saveCmd)
-	if _, err := docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", saveCmd}); err != nil {
-		return "", "", err
-	}
 	return key, keyPath, nil
 }
 
