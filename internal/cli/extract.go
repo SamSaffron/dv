@@ -27,6 +27,7 @@ var extractCmd = &cobra.Command{
 		echoCd, _ := cmd.Flags().GetBool("echo-cd")
 		syncMode, _ := cmd.Flags().GetBool("sync")
 		syncDebug, _ := cmd.Flags().GetBool("debug")
+		customDir, _ := cmd.Flags().GetString("dir")
 
 		if syncMode && chdir {
 			return fmt.Errorf("--sync cannot be combined with --chdir")
@@ -72,6 +73,9 @@ var extractCmd = &cobra.Command{
 		useCustomExtractor := customWorkdir != "" && path.Clean(customWorkdir) == path.Clean(work)
 		if useCustomExtractor {
 			localRepo := workspaceLocalPath(dataDir, work)
+			if customDir != "" {
+				localRepo = customDir
+			}
 			base := filepath.Base(work)
 			if base == "" || base == "." || base == string(filepath.Separator) {
 				base = name
@@ -117,6 +121,9 @@ var extractCmd = &cobra.Command{
 
 		// Ensure local clone
 		localRepo := filepath.Join(dataDir, "discourse_src")
+		if customDir != "" {
+			localRepo = customDir
+		}
 		repoCloneUrl := cfg.DiscourseRepo
 		if _, err := os.Stat(localRepo); os.IsNotExist(err) {
 			// Prefer SSH when possible; fall back to HTTPS
@@ -284,6 +291,7 @@ var extractCmd = &cobra.Command{
 
 func init() {
 	extractCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
+	extractCmd.Flags().String("dir", "", "Extract to a specific directory instead of default location")
 	extractCmd.Flags().Bool("chdir", false, "Open a subshell in the extracted repo directory after completion")
 	extractCmd.Flags().Bool("echo-cd", false, "Print 'cd <path>' suitable for eval; suppress other output")
 	extractCmd.Flags().Bool("sync", false, "Watch for changes and synchronize container ↔ host")

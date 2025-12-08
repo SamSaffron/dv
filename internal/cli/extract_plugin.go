@@ -86,6 +86,7 @@ done
 		echoCd, _ := cmd.Flags().GetBool("echo-cd")
 		syncMode, _ := cmd.Flags().GetBool("sync")
 		syncDebug, _ := cmd.Flags().GetBool("debug")
+		customDir, _ := cmd.Flags().GetString("dir")
 
 		if syncMode && chdir {
 			return fmt.Errorf("--sync cannot be combined with --chdir")
@@ -134,6 +135,9 @@ done
 		pluginWork := filepath.Join(work, "plugins", pluginName)
 
 		localRepo := filepath.Join(dataDir, fmt.Sprintf("%s_src", pluginName))
+		if customDir != "" {
+			localRepo = customDir
+		}
 		display := fmt.Sprintf("plugin %s", pluginName)
 		return extractWorkspaceRepo(workspaceExtractOptions{
 			cmd:              cmd,
@@ -152,6 +156,7 @@ done
 
 func init() {
 	extractPluginCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
+	extractPluginCmd.Flags().String("dir", "", "Extract to a specific directory instead of default location")
 	extractPluginCmd.Flags().Bool("chdir", false, "Open a subshell in the extracted repo directory after completion")
 	extractPluginCmd.Flags().Bool("echo-cd", false, "Print 'cd <path>' suitable for eval; suppress other output")
 	extractPluginCmd.Flags().Bool("sync", false, "Watch for changes and synchronize container ↔ host")
