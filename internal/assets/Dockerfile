@@ -75,7 +75,7 @@ RUN mkdir -p /etc/service/unicorn && \
 #!/bin/bash
 
 cd /var/www/discourse
-HOME=/home/discourse USER=discourse exec chpst -u discourse:discourse -U discourse:discourse bin/unicorn
+HOME=/home/discourse USER=discourse exec chpst -u discourse:discourse -U discourse:discourse bin/unicorn >> /var/www/discourse/log/unicorn.log 2>&1
 EOF
 RUN chmod +x /etc/service/unicorn/run
 
