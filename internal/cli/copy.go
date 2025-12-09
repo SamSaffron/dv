@@ -32,6 +32,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		src := args[0]
 		dst := args[1]
+		verbose, _ := cmd.Flags().GetBool("verbose")
 
 		// Resolve config
 		configDir, err := xdg.ConfigDir()
@@ -72,7 +73,7 @@ Examples:
 		if srcContainer == "" && dstContainer == "" {
 			// Default: host → selected container
 			dstContainer = currentAgentName(cfg)
-			return copyHostToContainer(src, dstPath, dstContainer)
+			return copyHostToContainer(src, dstPath, dstContainer, verbose)
 		}
 
 		if srcContainer != "" {
@@ -80,14 +81,14 @@ Examples:
 			if !docker.Running(srcContainer) {
 				return fmt.Errorf("container '%s' is not running; run 'dv start' first", srcContainer)
 			}
-			return copyContainerToHost(srcContainer, srcPath, dstPath)
+			return copyContainerToHost(srcContainer, srcPath, dstPath, verbose)
 		}
 
 		// Host → container
 		if !docker.Running(dstContainer) {
 			return fmt.Errorf("container '%s' is not running; run 'dv start' first", dstContainer)
 		}
-		return copyHostToContainer(src, dstPath, dstContainer)
+		return copyHostToContainer(src, dstPath, dstContainer, verbose)
 	},
 }
 
@@ -102,7 +103,7 @@ func parseContainerPath(arg string) (container, path string) {
 	return arg[:idx], arg[idx+1:]
 }
 
-func copyHostToContainer(srcOnHost, dstInContainer, containerName string) error {
+func copyHostToContainer(srcOnHost, dstInContainer, containerName string, verbose bool) error {
 	// Validate source exists on host
 	if _, err := os.Stat(srcOnHost); err != nil {
 		if os.IsNotExist(err) {
@@ -116,19 +117,24 @@ func copyHostToContainer(srcOnHost, dstInContainer, containerName string) error 
 		return fmt.Errorf("failed to copy %s to container %s:%s: %w", srcOnHost, containerName, dstInContainer, err)
 	}
 
-	fmt.Printf("Copied %s → %s:%s\n", srcOnHost, containerName, dstInContainer)
+	if verbose {
+		fmt.Printf("Copied %s → %s:%s\n", srcOnHost, containerName, dstInContainer)
+	}
 	return nil
 }
 
-func copyContainerToHost(containerName, srcInContainer, dstOnHost string) error {
+func copyContainerToHost(containerName, srcInContainer, dstOnHost string, verbose bool) error {
 	if err := docker.CopyFromContainer(containerName, srcInContainer, dstOnHost); err != nil {
 		return fmt.Errorf("failed to copy %s:%s to %s: %w", containerName, srcInContainer, dstOnHost, err)
 	}
 
-	fmt.Printf("Copied %s:%s → %s\n", containerName, srcInContainer, dstOnHost)
+	if verbose {
+		fmt.Printf("Copied %s:%s → %s\n", containerName, srcInContainer, dstOnHost)
+	}
 	return nil
 }
 
 func init() {
 	copyCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
+	copyCmd.Flags().BoolP("verbose", "v", false, "Print progress messages")
 }
