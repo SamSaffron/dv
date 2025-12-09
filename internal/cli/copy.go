@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,23 +13,27 @@ import (
 )
 
 var copyCmd = &cobra.Command{
-	Use:     "copy SOURCE CONTAINER_PATH",
+	Use:     "copy SOURCE DEST",
 	Aliases: []string{"cp"},
-	Short:   "Copy a file or directory from host into the container",
-	Args:    cobra.ExactArgs(2),
+	Short:   "Copy files between host and container",
+	Long: `Copy files or directories between host and container.
+
+Syntax:
+  dv cp <host-path> <container-path>     Copy host → container
+  dv cp @:<container-path> <host-path>   Copy container → host (selected container)
+  dv cp <name>:<path> <host-path>        Copy container → host (named container)
+  dv cp <host-path> <name>:<path>        Copy host → named container
+
+Examples:
+  dv cp ./file.rb /var/www/discourse/    Copy from host to selected container
+  dv cp @:/var/www/discourse/log ./      Copy from selected container to host
+  dv cp agent-2:/tmp/file.txt ./         Copy from agent-2 container to host`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		srcOnHost := args[0]
-		dstInContainer := args[1]
+		src := args[0]
+		dst := args[1]
 
-		// Validate source exists on host
-		if _, err := os.Stat(srcOnHost); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("source path does not exist: %s", srcOnHost)
-			}
-			return fmt.Errorf("failed to stat source path: %w", err)
-		}
-
-		// Resolve config and container
+		// Resolve config
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
 			return err
@@ -38,23 +43,90 @@ var copyCmd = &cobra.Command{
 			return err
 		}
 
-		name, _ := cmd.Flags().GetString("name")
-		if name == "" {
-			name = currentAgentName(cfg)
+		// Parse source and destination
+		srcContainer, srcPath := parseContainerPath(src)
+		dstContainer, dstPath := parseContainerPath(dst)
+
+		// Resolve @ to selected container
+		if srcContainer == "@" {
+			srcContainer = currentAgentName(cfg)
+		}
+		if dstContainer == "@" {
+			dstContainer = currentAgentName(cfg)
 		}
 
-		if !docker.Running(name) {
-			return fmt.Errorf("container '%s' is not running; run 'dv start' first", name)
+		// Handle --name flag override for backward compatibility
+		nameFlag, _ := cmd.Flags().GetString("name")
+		if nameFlag != "" {
+			if srcContainer == "" && dstContainer == "" {
+				// Old behavior: host → container
+				dstContainer = nameFlag
+			}
 		}
 
-		// Copy with recursive ownership set to discourse:discourse
-		if err := docker.CopyToContainerWithOwnership(name, srcOnHost, dstInContainer, true); err != nil {
-			return fmt.Errorf("failed to copy %s to container %s:%s: %w", srcOnHost, name, dstInContainer, err)
+		// Determine direction
+		if srcContainer != "" && dstContainer != "" {
+			return fmt.Errorf("cannot specify container on both source and destination")
 		}
 
-		fmt.Printf("Copied %s to %s:%s\n", srcOnHost, name, dstInContainer)
-		return nil
+		if srcContainer == "" && dstContainer == "" {
+			// Default: host → selected container
+			dstContainer = currentAgentName(cfg)
+			return copyHostToContainer(src, dstPath, dstContainer)
+		}
+
+		if srcContainer != "" {
+			// Container → host
+			if !docker.Running(srcContainer) {
+				return fmt.Errorf("container '%s' is not running; run 'dv start' first", srcContainer)
+			}
+			return copyContainerToHost(srcContainer, srcPath, dstPath)
+		}
+
+		// Host → container
+		if !docker.Running(dstContainer) {
+			return fmt.Errorf("container '%s' is not running; run 'dv start' first", dstContainer)
+		}
+		return copyHostToContainer(src, dstPath, dstContainer)
 	},
+}
+
+// parseContainerPath splits "container:path" into (container, path).
+// Returns ("", path) if no colon is present.
+// "@:path" returns ("@", path).
+func parseContainerPath(arg string) (container, path string) {
+	idx := strings.Index(arg, ":")
+	if idx == -1 {
+		return "", arg
+	}
+	return arg[:idx], arg[idx+1:]
+}
+
+func copyHostToContainer(srcOnHost, dstInContainer, containerName string) error {
+	// Validate source exists on host
+	if _, err := os.Stat(srcOnHost); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("source path does not exist: %s", srcOnHost)
+		}
+		return fmt.Errorf("failed to stat source path: %w", err)
+	}
+
+	// Copy with recursive ownership set to discourse:discourse
+	if err := docker.CopyToContainerWithOwnership(containerName, srcOnHost, dstInContainer, true); err != nil {
+		return fmt.Errorf("failed to copy %s to container %s:%s: %w", srcOnHost, containerName, dstInContainer, err)
+	}
+
+	fmt.Printf("Copied %s → %s:%s\n", srcOnHost, containerName, dstInContainer)
+	return nil
+}
+
+func copyContainerToHost(containerName, srcInContainer, dstOnHost string) error {
+	if err := docker.CopyFromContainer(containerName, srcInContainer, dstOnHost); err != nil {
+		return fmt.Errorf("failed to copy %s:%s to %s: %w", containerName, srcInContainer, dstOnHost, err)
+	}
+
+	fmt.Printf("Copied %s:%s → %s\n", containerName, srcInContainer, dstOnHost)
+	return nil
 }
 
 func init() {
