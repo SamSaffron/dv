@@ -73,7 +73,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 	rootCmd.AddCommand(resetCmd)
 	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(exposeCmd)
-	rootCmd.AddCommand(mailhogCmd)
+	rootCmd.AddCommand(mailCmd)
 	rootCmd.AddCommand(tuiCmd)
 	// Top-level agent management commands
 	rootCmd.AddCommand(listCmd)
