@@ -94,7 +94,7 @@ func Default() Config {
 			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
 			"CLAUDE_CODE_USE_BEDROCK", "DEEPSEEK_API_KEY", "GEMINI_API_KEY",
 			"AMP_API_KEY", "GH_TOKEN", "OPENROUTER_API_KEY", "KILOCODE_API_KEY",
-			"FACTORY_API_KEY",
+			"FACTORY_API_KEY", "MISTRAL_API_KEY",
 		},
 		DiscourseRepo:       "https://github.com/discourse/discourse.git",
 		ExtractBranchPrefix: "agent-changes",

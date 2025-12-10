@@ -365,6 +365,7 @@ The command writes the data to the same path as the running executable, so use `
 Automatically passed through when set on the host:
 
 - `CURSOR_API_KEY`
+- `MISTRAL_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `AWS_ACCESS_KEY_ID`

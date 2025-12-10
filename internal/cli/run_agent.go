@@ -386,6 +386,11 @@ var agentRules = map[string]agentRule{
 		withPrompt:  func(p string) []string { return []string{"droid", "exec", "--skip-permissions-unsafe", p} },
 		defaults:    []string{},
 	},
+	"vibe": {
+		interactive: func() []string { return []string{"vibe"} },
+		withPrompt:  func(p string) []string { return []string{"vibe", "--prompt", p} },
+		defaults:    []string{"--auto-approve"},
+	},
 }
 
 // shellJoin quotes argv for safe execution in a single shell command.

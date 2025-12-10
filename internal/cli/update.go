@@ -74,6 +74,7 @@ var updateAgentsCmd = &cobra.Command{
 			{label: "Cursor Agent", command: "curl -fsS https://cursor.com/install | bash", useUserPaths: true},
 			{label: "KiloCode CLI", command: "npm install -g @kilocode/cli", runAsRoot: true},
 			{label: "Factory Droid", command: "curl -fsSL https://app.factory.ai/cli | sh", useUserPaths: true},
+			{label: "Mistral Vibe", command: "curl -LsSf https://mistral.ai/vibe/install.sh | bash", useUserPaths: true},
 		}
 
 		for _, step := range steps {
