@@ -278,6 +278,7 @@ func (s *extractSync) runContainerWatcher() error {
 
 func (s *extractSync) processEvents() error {
 	const settleDelay = 250 * time.Millisecond
+	const flushTimeout = 30 * time.Second // Timeout for docker operations during flush
 	hostPaths := make(map[string]struct{})
 	containerPaths := make(map[string]struct{})
 	timer := time.NewTimer(settleDelay)
@@ -286,22 +287,61 @@ func (s *extractSync) processEvents() error {
 	}
 	timerActive := false
 
-	flush := func() error {
-		if len(hostPaths) > 0 {
-			paths := mapKeys(hostPaths)
-			if err := s.processHostChanges(paths); err != nil {
-				return err
-			}
-			hostPaths = make(map[string]struct{})
+	// flushWithTimeout runs flush in a goroutine with timeout protection.
+	// Returns nil on timeout (logs warning), error on failure, nil on success.
+	flushWithTimeout := func(timeout time.Duration) error {
+		// Check context before starting
+		select {
+		case <-s.ctx.Done():
+			return nil
+		default:
 		}
-		if len(containerPaths) > 0 {
-			paths := mapKeys(containerPaths)
-			if err := s.processContainerChanges(paths); err != nil {
-				return err
-			}
-			containerPaths = make(map[string]struct{})
+
+		// Collect paths to process
+		hostToProcess := mapKeys(hostPaths)
+		containerToProcess := mapKeys(containerPaths)
+		hostPaths = make(map[string]struct{})
+		containerPaths = make(map[string]struct{})
+
+		if len(hostToProcess) == 0 && len(containerToProcess) == 0 {
+			return nil
 		}
-		return nil
+
+		flushDone := make(chan error, 1)
+		go func() {
+			var err error
+			if len(hostToProcess) > 0 {
+				if err = s.processHostChanges(hostToProcess); err != nil {
+					flushDone <- err
+					return
+				}
+			}
+			if len(containerToProcess) > 0 {
+				if err = s.processContainerChanges(containerToProcess); err != nil {
+					flushDone <- err
+					return
+				}
+			}
+			flushDone <- nil
+		}()
+
+		select {
+		case err := <-flushDone:
+			return err
+		case <-s.ctx.Done():
+			// Context cancelled while flushing - wait briefly for clean exit
+			select {
+			case <-flushDone:
+			case <-time.After(2 * time.Second):
+				s.debugf("flush interrupted by context cancellation")
+			}
+			return nil
+		case <-time.After(timeout):
+			s.debugf("flush timed out after %v - possible docker hang", timeout)
+			// Don't return error - just log and continue. The goroutine will
+			// eventually complete or be abandoned.
+			return nil
+		}
 	}
 
 	for {
@@ -315,18 +355,9 @@ func (s *extractSync) processEvents() error {
 					}
 				}
 			}
-			// Flush with a timeout to prevent hanging on cleanup
-			flushDone := make(chan error, 1)
-			go func() {
-				flushDone <- flush()
-			}()
-			select {
-			case err := <-flushDone:
-				return err
-			case <-time.After(2 * time.Second):
-				// Timeout during cleanup - exit anyway
-				return nil
-			}
+			// Final flush with short timeout on cleanup
+			_ = flushWithTimeout(2 * time.Second)
+			return nil
 		case event := <-s.events:
 			if event.source == sourceHost {
 				hostPaths[event.path] = struct{}{}
@@ -345,7 +376,7 @@ func (s *extractSync) processEvents() error {
 			timerActive = true
 		case <-timer.C:
 			timerActive = false
-			if err := flush(); err != nil {
+			if err := flushWithTimeout(flushTimeout); err != nil {
 				return err
 			}
 		}
