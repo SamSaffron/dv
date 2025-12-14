@@ -78,6 +78,7 @@ type LocalProxyConfig struct {
 	ImageTag      string `json:"imageTag"`
 	HTTPPort      int    `json:"httpPort"`
 	APIPort       int    `json:"apiPort"`
+	Public        bool   `json:"public"`
 }
 
 func Default() Config {
@@ -306,6 +307,7 @@ func defaultLocalProxyConfig() LocalProxyConfig {
 		ImageTag:      "dv-local-proxy",
 		HTTPPort:      80,
 		APIPort:       2080,
+		Public:        false,
 	}
 }
 
@@ -322,5 +324,9 @@ func (c *LocalProxyConfig) ApplyDefaults() {
 	}
 	if c.APIPort == 0 {
 		c.APIPort = defaults.APIPort
+	}
+	// Public flag defaults to false (private binding)
+	if !c.Public {
+		c.Public = defaults.Public
 	}
 }

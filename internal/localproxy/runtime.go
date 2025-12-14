@@ -20,7 +20,7 @@ func BuildImage(configDir string, cfg config.LocalProxyConfig) error {
 	return docker.BuildFrom(cfg.ImageTag, dockerfile, contextDir, docker.BuildOptions{})
 }
 
-func EnsureContainer(cfg config.LocalProxyConfig, recreate bool) error {
+func EnsureContainer(cfg config.LocalProxyConfig, recreate bool, public bool) error {
 	name := strings.TrimSpace(cfg.ContainerName)
 	if name == "" {
 		return fmt.Errorf("local proxy container name is empty")
@@ -54,14 +54,24 @@ func EnsureContainer(cfg config.LocalProxyConfig, recreate bool) error {
 	args := []string{
 		"run", "-d",
 		"--name", name,
-		"-p", fmt.Sprintf("%d:%d", cfg.HTTPPort, 80),
-		"-p", fmt.Sprintf("%d:%d", cfg.APIPort, 2080),
+	}
+	
+	// Bind to appropriate interface based on public flag
+	if public {
+		args = append(args, "-p", fmt.Sprintf("%d:%d", cfg.HTTPPort, 80))
+		args = append(args, "-p", fmt.Sprintf("%d:%d", cfg.APIPort, 2080))
+	} else {
+		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", cfg.HTTPPort, 80))
+		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", cfg.APIPort, 2080))
+	}
+	
+	args = append(args,
 		"--add-host", "host.docker.internal:host-gateway",
 		"--restart", "unless-stopped",
 		"--label", "com.dv.owner=dv",
 		"--label", LabelEnabled + "=true",
 		"--label", LabelHTTPPort + "=" + strconv.Itoa(cfg.HTTPPort),
-	}
+	)
 
 	args = append(args, "-e", "PROXY_HTTP_ADDR=:80")
 	args = append(args, "-e", "PROXY_API_ADDR=:2080")

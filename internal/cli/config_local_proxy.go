@@ -36,6 +36,7 @@ var configLocalProxyCmd = &cobra.Command{
 		apiPortFlag, _ := cmd.Flags().GetInt("api-port")
 		rebuild, _ := cmd.Flags().GetBool("rebuild")
 		recreate, _ := cmd.Flags().GetBool("recreate")
+		public, _ := cmd.Flags().GetBool("public")
 
 		if name := trimFlag(nameFlag); name != "" {
 			lp.ContainerName = name
@@ -64,7 +65,7 @@ var configLocalProxyCmd = &cobra.Command{
 			fmt.Fprintf(cmd.OutOrStdout(), "Reusing existing image '%s'.\n", lp.ImageTag)
 		}
 
-		if err := localproxy.EnsureContainer(lp, recreate); err != nil {
+		if err := localproxy.EnsureContainer(lp, recreate, public); err != nil {
 			return err
 		}
 		if err := localproxy.Healthy(lp, 5*time.Second); err != nil {
@@ -77,7 +78,11 @@ var configLocalProxyCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Local proxy '%s' is ready on port %d; API on %d.\n", lp.ContainerName, lp.HTTPPort, lp.APIPort)
+		if public {
+			fmt.Fprintf(cmd.OutOrStdout(), "Local proxy '%s' is ready on port %d (public); API on %d (public).\n", lp.ContainerName, lp.HTTPPort, lp.APIPort)
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "Local proxy '%s' is ready on port %d (localhost only); API on %d (localhost only).\n", lp.ContainerName, lp.HTTPPort, lp.APIPort)
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), "New containers will register as NAME.localhost when this proxy is running. Remove the proxy container to stop using it.")
 		return nil
 	},
@@ -90,6 +95,7 @@ func init() {
 	configLocalProxyCmd.Flags().Int("api-port", 0, "Host port for the proxy management API")
 	configLocalProxyCmd.Flags().Bool("rebuild", false, "Force rebuilding the proxy image even if it exists")
 	configLocalProxyCmd.Flags().Bool("recreate", false, "Remove any existing proxy container before starting")
+	configLocalProxyCmd.Flags().Bool("public", false, "Listen on all network interfaces (default: private/localhost only)")
 	configCmd.AddCommand(configLocalProxyCmd)
 }
 
