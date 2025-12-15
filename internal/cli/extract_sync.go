@@ -76,6 +76,8 @@ type extractSync struct {
 	events        chan watcherEvent
 }
 
+var errSyncSkipped = errors.New("sync skipped")
+
 func runExtractSync(cmd *cobra.Command, opts syncOptions) error {
 	ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	s := &extractSync{
@@ -430,6 +432,10 @@ func (s *extractSync) processHostChanges(paths []string) error {
 				continue
 			}
 			if err := s.copyHostToContainer(change.path); err != nil {
+				if errors.Is(err, errSyncSkipped) {
+					s.debugf("skipping host → container copy for %s (file vanished)", change.path)
+					continue
+				}
 				return err
 			}
 			fmt.Fprintf(s.logOut, "host → container: updated %s\n", change.path)
@@ -485,6 +491,10 @@ func (s *extractSync) processHostChanges(paths []string) error {
 		}
 		if !same {
 			if err := s.copyHostToContainer(rel); err != nil {
+				if errors.Is(err, errSyncSkipped) {
+					s.debugf("skipping host → container copy for %s (file vanished)", rel)
+					continue
+				}
 				s.debugf("copy failed for %s: %v", rel, err)
 				continue
 			}
@@ -544,6 +554,10 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 				continue
 			}
 			if err := s.copyContainerToHost(change.path); err != nil {
+				if errors.Is(err, errSyncSkipped) {
+					s.debugf("skipping container → host copy for %s (file vanished)", change.path)
+					continue
+				}
 				return err
 			}
 			fmt.Fprintf(s.logOut, "container → host: updated %s\n", change.path)
@@ -598,6 +612,10 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 		}
 		if !same {
 			if err := s.copyContainerToHost(rel); err != nil {
+				if errors.Is(err, errSyncSkipped) {
+					s.debugf("skipping container → host copy for %s (file vanished)", rel)
+					continue
+				}
 				s.debugf("copy failed for %s: %v", rel, err)
 				continue
 			}
@@ -751,6 +769,9 @@ func (s *extractSync) copyHostToContainer(rel string) error {
 	hostPath := filepath.Join(s.localRepo, filepath.FromSlash(rel))
 	info, err := os.Stat(hostPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errSyncSkipped
+		}
 		return err
 	}
 	if info.IsDir() {
@@ -764,6 +785,10 @@ func (s *extractSync) copyHostToContainer(rel string) error {
 		return err
 	}
 	if err := docker.CopyToContainerWithOwnership(s.containerName, hostPath, destDir, false); err != nil {
+		// The file may have vanished between the initial stat and docker reading it.
+		if _, statErr := os.Stat(hostPath); errors.Is(statErr, os.ErrNotExist) {
+			return errSyncSkipped
+		}
 		return err
 	}
 	// Ensure the discourse user retains write permissions
@@ -780,7 +805,16 @@ func (s *extractSync) copyContainerToHost(rel string) error {
 		return err
 	}
 	containerPath := path.Join(s.workdir, rel)
-	return docker.CopyFromContainer(s.containerName, containerPath, hostPath)
+	if err := docker.CopyFromContainer(s.containerName, containerPath, hostPath); err != nil {
+		// The file may have vanished between event delivery and copying.
+		checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
+		out, _ := docker.ExecOutput(s.containerName, s.workdir, checkCmd)
+		if !strings.Contains(out, "exists") {
+			return errSyncSkipped
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *extractSync) removeInContainer(rel string) error {

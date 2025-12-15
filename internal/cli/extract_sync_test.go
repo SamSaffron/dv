@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -286,6 +288,21 @@ func TestProcessHostChangesWithSlowDocker(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("processEvents hung when docker should have failed fast")
+	}
+}
+
+func TestCopyHostToContainerSkipsIfFileVanishes(t *testing.T) {
+	s := &extractSync{
+		containerName: "fake-container",
+		workdir:       "/fake/workdir",
+		localRepo:     t.TempDir(),
+		logOut:        io.Discard,
+		errOut:        io.Discard,
+	}
+
+	err := s.copyHostToContainer("spec/lib/.conform.7348585.search_spec.rb")
+	if err == nil || !errors.Is(err, errSyncSkipped) {
+		t.Fatalf("expected errSyncSkipped, got %v", err)
 	}
 }
 
