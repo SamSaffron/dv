@@ -391,7 +391,7 @@ func hostnameForContainer(name string) string {
 	if base == "" {
 		base = "dv"
 	}
-	return base + ".localhost"
+	return base + ".dv.localhost"
 }
 
 // getContainerHostPort extracts the published host port from a running container

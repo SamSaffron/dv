@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -20,7 +21,7 @@ func BuildImage(configDir string, cfg config.LocalProxyConfig) error {
 	return docker.BuildFrom(cfg.ImageTag, dockerfile, contextDir, docker.BuildOptions{})
 }
 
-func EnsureContainer(cfg config.LocalProxyConfig, recreate bool, public bool) error {
+func EnsureContainer(configDir string, cfg config.LocalProxyConfig, recreate bool) error {
 	name := strings.TrimSpace(cfg.ContainerName)
 	if name == "" {
 		return fmt.Errorf("local proxy container name is empty")
@@ -28,6 +29,12 @@ func EnsureContainer(cfg config.LocalProxyConfig, recreate bool, public bool) er
 
 	if cfg.HTTPPort == cfg.APIPort {
 		return fmt.Errorf("http and api ports must differ")
+	}
+	if cfg.HTTPS && cfg.HTTPSPort == cfg.APIPort {
+		return fmt.Errorf("https and api ports must differ")
+	}
+	if cfg.HTTPS && cfg.HTTPSPort == cfg.HTTPPort {
+		return fmt.Errorf("https and http ports must differ")
 	}
 
 	if recreate && docker.Exists(name) {
@@ -47,6 +54,9 @@ func EnsureContainer(cfg config.LocalProxyConfig, recreate bool, public bool) er
 	if PortOccupied(cfg.HTTPPort) {
 		return fmt.Errorf("host port %d is already in use", cfg.HTTPPort)
 	}
+	if cfg.HTTPS && PortOccupied(cfg.HTTPSPort) {
+		return fmt.Errorf("host port %d is already in use", cfg.HTTPSPort)
+	}
 	if PortOccupied(cfg.APIPort) {
 		return fmt.Errorf("host port %d is already in use", cfg.APIPort)
 	}
@@ -55,26 +65,48 @@ func EnsureContainer(cfg config.LocalProxyConfig, recreate bool, public bool) er
 		"run", "-d",
 		"--name", name,
 	}
-	
+
 	// Bind to appropriate interface based on public flag
-	if public {
+	if cfg.Public {
 		args = append(args, "-p", fmt.Sprintf("%d:%d", cfg.HTTPPort, 80))
+		if cfg.HTTPS {
+			args = append(args, "-p", fmt.Sprintf("%d:%d", cfg.HTTPSPort, 443))
+		}
 		args = append(args, "-p", fmt.Sprintf("%d:%d", cfg.APIPort, 2080))
 	} else {
 		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", cfg.HTTPPort, 80))
+		if cfg.HTTPS {
+			args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", cfg.HTTPSPort, 443))
+		}
 		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%d:%d", cfg.APIPort, 2080))
 	}
-	
+
 	args = append(args,
 		"--add-host", "host.docker.internal:host-gateway",
 		"--restart", "unless-stopped",
 		"--label", "com.dv.owner=dv",
-		"--label", LabelEnabled + "=true",
-		"--label", LabelHTTPPort + "=" + strconv.Itoa(cfg.HTTPPort),
+		"--label", LabelEnabled+"=true",
+		"--label", LabelHTTPPort+"="+strconv.Itoa(cfg.HTTPPort),
 	)
+	if cfg.HTTPS {
+		args = append(args, "--label", LabelHTTPSPort+"="+strconv.Itoa(cfg.HTTPSPort))
+	}
 
 	args = append(args, "-e", "PROXY_HTTP_ADDR=:80")
 	args = append(args, "-e", "PROXY_API_ADDR=:2080")
+	if cfg.HTTPS {
+		certPath, keyPath := TLSPaths(configDir)
+		if !fileNonEmpty(certPath) || !fileNonEmpty(keyPath) {
+			return fmt.Errorf("missing TLS cert/key at %s and %s (run dv config local-proxy --https to generate them)", certPath, keyPath)
+		}
+		tlsDir := filepath.Dir(certPath)
+		args = append(args, "-v", fmt.Sprintf("%s:/etc/local-proxy/tls:ro", tlsDir))
+		args = append(args, "-e", "PROXY_HTTPS_ADDR=:443")
+		args = append(args, "-e", "PROXY_TLS_CERT_FILE=/etc/local-proxy/tls/"+filepath.Base(certPath))
+		args = append(args, "-e", "PROXY_TLS_KEY_FILE=/etc/local-proxy/tls/"+filepath.Base(keyPath))
+		args = append(args, "-e", "PROXY_EXTERNAL_HTTPS_PORT="+strconv.Itoa(cfg.HTTPSPort))
+		args = append(args, "-e", "PROXY_REDIRECT_HTTP_TO_HTTPS=1")
+	}
 
 	args = append(args, cfg.ImageTag)
 

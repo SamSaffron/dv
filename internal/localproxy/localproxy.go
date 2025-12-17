@@ -17,6 +17,7 @@ const (
 	LabelHost       = "com.dv.local-proxy.host"
 	LabelTargetPort = "com.dv.local-proxy.target-port"
 	LabelHTTPPort   = "com.dv.local-proxy.http-port"
+	LabelHTTPSPort  = "com.dv.local-proxy.https-port"
 )
 
 var hostnameSanitizer = regexp.MustCompile(`[^a-z0-9-]`)
@@ -29,7 +30,7 @@ func HostnameForContainer(name string) string {
 	if base == "" {
 		base = "dv"
 	}
-	return base + ".localhost"
+	return base + ".dv.localhost"
 }
 
 func Enabled(cfg config.Config) bool {

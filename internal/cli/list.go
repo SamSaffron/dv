@@ -86,13 +86,23 @@ var listCmd = &cobra.Command{
 			urls := parseHostPortURLs(portsField)
 			if proxyActive {
 				if host, _, httpPort, ok := localproxy.RouteFromLabels(labelMap); ok && host != "" {
-					if httpPort <= 0 {
-						httpPort = cfg.LocalProxy.HTTPPort
-					}
-					if httpPort > 0 && httpPort != 80 {
-						urls = []string{fmt.Sprintf("http://%s:%d", host, httpPort)}
+					lp := cfg.LocalProxy
+					lp.ApplyDefaults()
+					if lp.HTTPS {
+						if lp.HTTPSPort > 0 && lp.HTTPSPort != 443 {
+							urls = []string{fmt.Sprintf("https://%s:%d", host, lp.HTTPSPort)}
+						} else {
+							urls = []string{"https://" + host}
+						}
 					} else {
-						urls = []string{"http://" + host}
+						if httpPort <= 0 {
+							httpPort = lp.HTTPPort
+						}
+						if httpPort > 0 && httpPort != 80 {
+							urls = []string{fmt.Sprintf("http://%s:%d", host, httpPort)}
+						} else {
+							urls = []string{"http://" + host}
+						}
 					}
 				}
 			}

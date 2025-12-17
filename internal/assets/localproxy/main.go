@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -91,7 +93,12 @@ func (p *proxyTable) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	httpAddr := envOrDefault("PROXY_HTTP_ADDR", ":80")
+	httpsAddr := envOrDefault("PROXY_HTTPS_ADDR", "")
 	apiAddr := envOrDefault("PROXY_API_ADDR", ":2080")
+	tlsCertFile := envOrDefault("PROXY_TLS_CERT_FILE", "")
+	tlsKeyFile := envOrDefault("PROXY_TLS_KEY_FILE", "")
+	redirectHTTP := isTruthyEnv("PROXY_REDIRECT_HTTP_TO_HTTPS")
+	externalHTTPSPort := envIntOrDefault("PROXY_EXTERNAL_HTTPS_PORT", 443)
 	table := newProxyTable()
 
 	go func() {
@@ -109,10 +116,44 @@ func main() {
 		}
 	}()
 
-	log.Printf("local-proxy listening on %s", httpAddr)
+	httpsEnabled := httpsAddr != "" || tlsCertFile != "" || tlsKeyFile != ""
+	if redirectHTTP && !httpsEnabled {
+		log.Fatalf("PROXY_REDIRECT_HTTP_TO_HTTPS requires PROXY_HTTPS_ADDR and TLS cert/key env vars")
+	}
+	if httpsEnabled {
+		if httpsAddr == "" {
+			httpsAddr = ":443"
+		}
+		if tlsCertFile == "" || tlsKeyFile == "" {
+			log.Fatalf("PROXY_TLS_CERT_FILE and PROXY_TLS_KEY_FILE are required when PROXY_HTTPS_ADDR is set")
+		}
+		go func() {
+			log.Printf("local-proxy HTTPS listening on %s", httpsAddr)
+			server := &http.Server{
+				Addr:              httpsAddr,
+				Handler:           table,
+				ReadHeaderTimeout: 5 * time.Second,
+				TLSConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+				},
+			}
+			if err := server.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("https server error: %v", err)
+			}
+		}()
+	}
+
+	var handler http.Handler = table
+	if httpsEnabled && redirectHTTP {
+		handler = redirectToHTTPSHandler(externalHTTPSPort)
+		log.Printf("local-proxy HTTP redirect listening on %s", httpAddr)
+	} else {
+		log.Printf("local-proxy HTTP listening on %s", httpAddr)
+	}
+
 	server := &http.Server{
 		Addr:              httpAddr,
-		Handler:           table,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -143,7 +184,7 @@ func apiRouter(table *proxyTable) http.Handler {
 			}
 			host := normalizeHost(payload.Host)
 			if host == "" {
-				http.Error(w, "host must end with .localhost", http.StatusBadRequest)
+				http.Error(w, "host must end with .dv.localhost", http.StatusBadRequest)
 				return
 			}
 			target, err := parseTarget(payload.Target)
@@ -166,7 +207,7 @@ func apiRouter(table *proxyTable) http.Handler {
 		}
 		host := normalizeHost(strings.TrimPrefix(r.URL.Path, "/api/routes/"))
 		if host == "" {
-			http.Error(w, "host must end with .localhost", http.StatusBadRequest)
+			http.Error(w, "host must end with .dv.localhost", http.StatusBadRequest)
 			return
 		}
 		if !table.delete(host) {
@@ -187,6 +228,44 @@ func envOrDefault(key string, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+func isTruthyEnv(key string) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func envIntOrDefault(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
+func redirectToHTTPSHandler(externalPort int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := normalizeHost(r.Host)
+		if host == "" {
+			http.Error(w, "missing host", http.StatusBadGateway)
+			return
+		}
+		targetHost := host
+		if externalPort > 0 && externalPort != 443 {
+			targetHost = fmt.Sprintf("%s:%d", host, externalPort)
+		}
+		target := "https://" + targetHost + r.URL.RequestURI()
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
+	})
 }
 
 func normalizeHost(h string) string {
@@ -211,7 +290,7 @@ func normalizeHost(h string) string {
 			h = hostOnly
 		}
 	}
-	if !strings.HasSuffix(h, ".localhost") {
+	if !strings.HasSuffix(h, ".dv.localhost") {
 		return ""
 	}
 	return h
@@ -238,6 +317,8 @@ func parseTarget(raw string) (*url.URL, error) {
 func buildReverseProxy(host string, target *url.URL) *httputil.ReverseProxy {
 	targetQuery := target.RawQuery
 	director := func(req *http.Request) {
+		_, port := splitHostPortMaybe(req.Host)
+
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
@@ -246,10 +327,30 @@ func buildReverseProxy(host string, target *url.URL) *httputil.ReverseProxy {
 		} else {
 			req.URL.RawQuery = targetQuery + "&" + req.URL.RawQuery
 		}
-		req.Host = host
-		req.Header.Set("X-Forwarded-Host", host)
-		req.Header.Set("X-Forwarded-Proto", "http")
-		req.Header.Set("X-Forwarded-Port", "80")
+		hostHeader := host
+		if port != "" {
+			hostHeader = host + ":" + port
+		}
+		req.Host = hostHeader
+		req.Header.Set("X-Forwarded-Host", hostHeader)
+
+		forwardedProto := "http"
+		defaultPort := "80"
+		if req.TLS != nil {
+			forwardedProto = "https"
+			defaultPort = "443"
+		}
+		if port != "" {
+			defaultPort = port
+		}
+		req.Header.Set("X-Forwarded-Proto", forwardedProto)
+		req.Header.Set("X-Forwarded-Port", defaultPort)
+		if forwardedProto == "https" {
+			req.Header.Set("X-Forwarded-Ssl", "on")
+		} else {
+			req.Header.Del("X-Forwarded-Ssl")
+		}
+
 		if ip, _, err := net.SplitHostPort(req.RemoteAddr); err == nil && ip != "" {
 			appendForwardedFor(req, ip)
 		}
@@ -262,6 +363,16 @@ func buildReverseProxy(host string, target *url.URL) *httputil.ReverseProxy {
 		},
 	}
 	return proxy
+}
+
+func splitHostPortMaybe(host string) (string, string) {
+	if strings.Contains(host, ":") {
+		hostOnly, port, err := net.SplitHostPort(host)
+		if err == nil {
+			return hostOnly, port
+		}
+	}
+	return host, ""
 }
 
 func appendForwardedFor(req *http.Request, ip string) {

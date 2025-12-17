@@ -77,6 +77,8 @@ type LocalProxyConfig struct {
 	ContainerName string `json:"containerName"`
 	ImageTag      string `json:"imageTag"`
 	HTTPPort      int    `json:"httpPort"`
+	HTTPS         bool   `json:"https,omitempty"`
+	HTTPSPort     int    `json:"httpsPort,omitempty"`
 	APIPort       int    `json:"apiPort"`
 	Public        bool   `json:"public"`
 }
@@ -306,6 +308,8 @@ func defaultLocalProxyConfig() LocalProxyConfig {
 		ContainerName: "dv-local-proxy",
 		ImageTag:      "dv-local-proxy",
 		HTTPPort:      80,
+		HTTPS:         false,
+		HTTPSPort:     0,
 		APIPort:       2080,
 		Public:        false,
 	}
@@ -322,11 +326,11 @@ func (c *LocalProxyConfig) ApplyDefaults() {
 	if c.HTTPPort == 0 {
 		c.HTTPPort = defaults.HTTPPort
 	}
+	if c.HTTPS && c.HTTPSPort == 0 {
+		c.HTTPSPort = 443
+	}
 	if c.APIPort == 0 {
 		c.APIPort = defaults.APIPort
 	}
-	// Public flag defaults to false (private binding)
-	if !c.Public {
-		c.Public = defaults.Public
-	}
+	// Public defaults to false (private binding) and doesn't need migration.
 }
