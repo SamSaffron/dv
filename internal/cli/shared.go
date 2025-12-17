@@ -167,12 +167,12 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 		envs := map[string]string{
 			"DISCOURSE_PORT": strconv.Itoa(chosenPort),
 		}
-		proxyHost := applyLocalProxyMetadata(cfg, name, chosenPort, labels, envs)
+		proxyHost := applyLocalProxyMetadata(cfg, name, chosenPort, cfg.ContainerPort, labels, envs)
 		if err := docker.RunDetached(name, workdir, imageTag, chosenPort, cfg.ContainerPort, labels, envs); err != nil {
 			return err
 		}
 		if proxyHost != "" {
-			registerWithLocalProxy(cmd, cfg, proxyHost, chosenPort)
+			registerWithLocalProxy(cmd, cfg, name, proxyHost, cfg.ContainerPort)
 		}
 	} else if !docker.Running(name) {
 		if err := docker.Start(name); err != nil {

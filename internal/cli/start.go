@@ -85,7 +85,7 @@ var startCmd = &cobra.Command{
 			envs := map[string]string{
 				"DISCOURSE_PORT": strconv.Itoa(chosenPort),
 			}
-			proxyHost := applyLocalProxyMetadata(cfg, name, chosenPort, labels, envs)
+			proxyHost := applyLocalProxyMetadata(cfg, name, chosenPort, containerPort, labels, envs)
 			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort, labels, envs); err != nil {
 				return err
 			}
@@ -94,7 +94,7 @@ var startCmd = &cobra.Command{
 			time.Sleep(500 * time.Millisecond)
 
 			if proxyHost != "" {
-				registerWithLocalProxy(cmd, cfg, proxyHost, chosenPort)
+				registerWithLocalProxy(cmd, cfg, name, proxyHost, containerPort)
 			}
 		} else if !docker.Running(name) {
 			fmt.Fprintf(cmd.OutOrStdout(), "Starting existing container '%s'...\n", name)

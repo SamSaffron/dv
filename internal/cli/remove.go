@@ -47,7 +47,7 @@ var removeCmd = &cobra.Command{
 		var proxyHost string
 		if cfg.LocalProxy.Enabled {
 			if labels, err := docker.Labels(name); err == nil {
-				if host, _, _, ok := localproxy.RouteFromLabels(labels); ok {
+				if host, _, _, _, ok := localproxy.RouteFromLabels(labels); ok {
 					proxyHost = host
 				}
 			}

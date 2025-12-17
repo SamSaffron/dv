@@ -11,7 +11,7 @@ import (
 	"dv/internal/localproxy"
 )
 
-func applyLocalProxyMetadata(cfg config.Config, containerName string, hostPort int, labels map[string]string, envs map[string]string) string {
+func applyLocalProxyMetadata(cfg config.Config, containerName string, hostPort int, containerPort int, labels map[string]string, envs map[string]string) string {
 	if !cfg.LocalProxy.Enabled || hostPort <= 0 {
 		return ""
 	}
@@ -25,6 +25,7 @@ func applyLocalProxyMetadata(cfg config.Config, containerName string, hostPort i
 	labels[localproxy.LabelEnabled] = "true"
 	labels[localproxy.LabelHost] = host
 	labels[localproxy.LabelTargetPort] = strconv.Itoa(hostPort)
+	labels[localproxy.LabelContainerPort] = strconv.Itoa(containerPort)
 	labels[localproxy.LabelHTTPPort] = strconv.Itoa(lp.HTTPPort)
 	if lp.HTTPS {
 		labels[localproxy.LabelHTTPSPort] = strconv.Itoa(lp.HTTPSPort)
@@ -50,8 +51,8 @@ func applyLocalProxyMetadata(cfg config.Config, containerName string, hostPort i
 	return host
 }
 
-func registerWithLocalProxy(cmd *cobra.Command, cfg config.Config, host string, hostPort int) {
-	if host == "" || hostPort <= 0 || !cfg.LocalProxy.Enabled {
+func registerWithLocalProxy(cmd *cobra.Command, cfg config.Config, containerName string, host string, containerPort int) {
+	if host == "" || containerPort <= 0 || !cfg.LocalProxy.Enabled {
 		return
 	}
 	lp := cfg.LocalProxy
@@ -59,7 +60,13 @@ func registerWithLocalProxy(cmd *cobra.Command, cfg config.Config, host string, 
 	if !localproxy.Running(lp) {
 		return
 	}
-	target := fmt.Sprintf("http://host.docker.internal:%d", hostPort)
+	// Get the container's internal IP address to route traffic directly
+	containerIP, err := docker.ContainerIP(containerName)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Failed to get container IP for %s: %v\n", containerName, err)
+		return
+	}
+	target := fmt.Sprintf("http://%s:%d", containerIP, containerPort)
 	if err := localproxy.RegisterRoute(lp, host, target); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Failed to register %s at %s: %v\n", host, target, err)
 	}
@@ -73,9 +80,9 @@ func registerContainerFromLabels(cmd *cobra.Command, cfg config.Config, name str
 	if err != nil {
 		return
 	}
-	host, port, _, ok := localproxy.RouteFromLabels(labels)
+	host, _, containerPort, _, ok := localproxy.RouteFromLabels(labels)
 	if !ok {
 		return
 	}
-	registerWithLocalProxy(cmd, cfg, host, port)
+	registerWithLocalProxy(cmd, cfg, name, host, containerPort)
 }

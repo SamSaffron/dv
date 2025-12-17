@@ -85,7 +85,7 @@ var listCmd = &cobra.Command{
 			statusText, timeText := parseStatus(status)
 			urls := parseHostPortURLs(portsField)
 			if proxyActive {
-				if host, _, httpPort, ok := localproxy.RouteFromLabels(labelMap); ok && host != "" {
+				if host, _, _, httpPort, ok := localproxy.RouteFromLabels(labelMap); ok && host != "" {
 					lp := cfg.LocalProxy
 					lp.ApplyDefaults()
 					if lp.HTTPS {

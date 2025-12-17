@@ -181,11 +181,24 @@ func Start(name string) error {
 	return cmd.Run()
 }
 
+// ContainerIP returns the IP address of a running container on the default bridge network.
+func ContainerIP(name string) (string, error) {
+	out, err := exec.Command("docker", "inspect", name, "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}").Output()
+	if err != nil {
+		return "", err
+	}
+	ip := strings.TrimSpace(string(out))
+	if ip == "" {
+		return "", fmt.Errorf("container %s has no IP address", name)
+	}
+	return ip, nil
+}
+
 func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string, envs map[string]string) error {
 	args := []string{"run", "-d",
 		"--name", name,
 		"-w", workdir,
-		"-p", fmt.Sprintf("%d:%d", hostPort, containerPort),
+		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 	}
 	// Apply environment variables
 	for k, v := range envs {
