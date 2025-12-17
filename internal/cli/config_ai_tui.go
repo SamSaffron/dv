@@ -675,7 +675,7 @@ func (m aiConfigModel) renderStatusLine() string {
 		{"Anthropic", "ANT", []string{"ANTHROPIC_API_KEY"}},
 		{"OpenRouter", "OR", []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY"}},
 		{"Groq", "GRQ", []string{"GROQ_API_KEY"}},
-		{"Gemini", "GEM", []string{"GEMINI_API_KEY"}},
+		{"Gemini", "GEM", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
 		{"GitHub", "GH", []string{"GH_TOKEN"}},
 		{"Bedrock", "AWS", []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}},
 	}
@@ -1034,6 +1034,9 @@ func (i providerItem) Description() string {
 	}
 	// Handle free models
 	if i.model.InputCost == 0 && i.model.OutputCost == 0 {
+		if pricingUnknown(i.model) {
+			return fmt.Sprintf("%s · ctx %d · pricing unknown", i.model.Provider, i.model.ContextTokens)
+		}
 		return fmt.Sprintf("%s · ctx %d · FREE", i.model.Provider, i.model.ContextTokens)
 	}
 	return fmt.Sprintf("%s · ctx %d · $%.4f/$%.4f", i.model.Provider, i.model.ContextTokens, i.model.InputCost, i.model.OutputCost)
@@ -1044,6 +1047,24 @@ func (i providerItem) FilterValue() string {
 		return i.model.ID
 	}
 	return i.entryID
+}
+
+func pricingUnknown(model ai.ProviderModel) bool {
+	if model.Raw == nil {
+		return false
+	}
+	raw, ok := model.Raw["dv_pricing_unknown"]
+	if !ok {
+		return false
+	}
+	switch val := raw.(type) {
+	case bool:
+		return val
+	case string:
+		return strings.EqualFold(strings.TrimSpace(val), "true")
+	default:
+		return false
+	}
 }
 
 type fieldKind int
@@ -1087,6 +1108,11 @@ type createForm struct {
 }
 
 func newCreateForm(entryID string, model ai.ProviderModel, meta ai.LLMMetadata, env map[string]string) *createForm {
+	maxOutputTokens := outputTokenLimitHint(model)
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = model.ContextTokens / 4
+	}
+
 	fields := []*formField{
 		newTextField("display_name", "Display Name", model.DisplayName, false),
 		newTextField("name", "Short Name", model.ID, false),
@@ -1095,7 +1121,7 @@ func newCreateForm(entryID string, model ai.ProviderModel, meta ai.LLMMetadata, 
 		newTextField("url", "API URL", model.Endpoint, false),
 		newTextField("api_key", "API Key", firstNonEmpty(env, providerKeyHints(entryID)...), true),
 		newTextField("max_prompt_tokens", "Max Prompt Tokens", safeInt(model.ContextTokens, 131072), false),
-		newTextField("max_output_tokens", "Max Output Tokens", safeInt(model.ContextTokens/4, 4096), false),
+		newTextField("max_output_tokens", "Max Output Tokens", safeInt(maxOutputTokens, 4096), false),
 		newTextField("input_cost", "Input Cost ($/1M)", fmt.Sprintf("%.4f", model.InputCost), false),
 		newTextField("cached_input_cost", "Cached Input Cost ($/1M)", fmt.Sprintf("%.4f", model.CachedInputCost), false),
 		newTextField("output_cost", "Output Cost ($/1M)", fmt.Sprintf("%.4f", model.OutputCost), false),
@@ -1214,6 +1240,40 @@ func safeInt(val int, fallback int) string {
 		val = fallback
 	}
 	return fmt.Sprintf("%d", val)
+}
+
+func outputTokenLimitHint(model ai.ProviderModel) int {
+	if model.Raw == nil {
+		return 0
+	}
+	for _, key := range []string{"outputTokenLimit", "output_token_limit"} {
+		if v, ok := model.Raw[key]; ok {
+			if out := intFromAny(v); out > 0 {
+				return out
+			}
+		}
+	}
+	return 0
+}
+
+func intFromAny(v interface{}) int {
+	switch val := v.(type) {
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case float64:
+		return int(val)
+	case json.Number:
+		if i, err := val.Int64(); err == nil {
+			return int(i)
+		}
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return i
+		}
+	}
+	return 0
 }
 
 func (f *createForm) advance() {
@@ -1567,6 +1627,8 @@ func providerSlug(entryID string) string {
 		return "open_router"
 	case "openai", "open_ai":
 		return "open_ai"
+	case "gemini", "google_gemini":
+		return "google"
 	case "bedrock", "amazon_bedrock", "aws_bedrock":
 		return "aws_bedrock"
 	default:
@@ -1746,16 +1808,23 @@ func stringValue(v interface{}) string {
 }
 
 func defaultTokenizerFor(provider string, meta ai.LLMMetadata) string {
-	target := "OpenAiTokenizer"
-	switch provider {
+	var targets []string
+	switch providerSlug(provider) {
 	case "open_ai", "open_router":
-		target = "OpenAiTokenizer"
+		targets = []string{"OpenAiTokenizer"}
+	case "anthropic", "aws_bedrock":
+		targets = []string{"AnthropicTokenizer"}
+	case "google":
+		targets = []string{"GeminiTokenizer"}
 	default:
-		target = ""
+		targets = nil
 	}
-	for _, tok := range meta.Tokenizers {
-		if target != "" && strings.Contains(tok.ID, target) {
-			return tok.ID
+
+	for _, target := range targets {
+		for _, tok := range meta.Tokenizers {
+			if strings.Contains(tok.ID, target) {
+				return tok.ID
+			}
 		}
 	}
 	if len(meta.Tokenizers) > 0 {
@@ -1772,6 +1841,8 @@ func providerKeyHints(entryID string) []string {
 		return []string{"OPENAI_API_KEY"}
 	case "anthropic":
 		return []string{"ANTHROPIC_API_KEY"}
+	case "gemini":
+		return []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}
 	case "bedrock":
 		return []string{"AWS_SECRET_ACCESS_KEY"}
 	default:

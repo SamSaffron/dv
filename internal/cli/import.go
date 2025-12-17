@@ -209,7 +209,7 @@ var importCmd = &cobra.Command{
 			return fmt.Errorf("container: failed to fetch refs: %v\n%s", err, strings.TrimSpace(out))
 		}
 		// 3) Force-align base branch name to the exact baseSha without failing when already checked out
-		alignCmd := fmt.Sprintf(strings.Join([]string{
+		alignCmd := strings.Join([]string{
 			"set -euo pipefail",
 			fmt.Sprintf("branch=%s", shellQuote(base)),
 			fmt.Sprintf("sha=%s", shellQuote(baseSha)),
@@ -223,7 +223,7 @@ var importCmd = &cobra.Command{
 			"\tgit checkout \"$branch\"",
 			"fi",
 			"git reset --hard \"$sha\"",
-		}, "\n"))
+		}, "\n")
 		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", alignCmd}); err != nil {
 			return fmt.Errorf("container: failed to set base branch %s to %s: %v\n%s", base, baseSha, err, strings.TrimSpace(out))
 		}

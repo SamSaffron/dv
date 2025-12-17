@@ -59,6 +59,7 @@ OpenRouter:
 Other Providers:
   GROQ_API_KEY            Groq API key for fast inference models
   GEMINI_API_KEY          Google Gemini API key
+  GOOGLE_API_KEY          Alternate Google Gemini API key variable
   DEEPSEEK_API_KEY        DeepSeek API key
 
 GitHub:

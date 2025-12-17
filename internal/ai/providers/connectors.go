@@ -23,6 +23,7 @@ var builtinConnectors = []connector{
 	&openRouterConnector{},
 	&openAIConnector{},
 	&anthropicConnector{},
+	&geminiConnector{},
 	&bedrockConnector{},
 }
 
