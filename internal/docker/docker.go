@@ -168,6 +168,14 @@ func RemoveImage(tag string) error {
 	return cmd.Run()
 }
 
+// RemoveImageQuiet removes an image, suppressing output and errors.
+// Useful for cleanup where failure is acceptable.
+func RemoveImageQuiet(tag string) error {
+	cmd := exec.Command("docker", "rmi", "-f", tag)
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	return cmd.Run()
+}
+
 // TagImage applies a new tag to an existing image (docker tag src dst)
 func TagImage(srcTag, dstTag string) error {
 	cmd := exec.Command("docker", "tag", srcTag, dstTag)
@@ -353,4 +361,62 @@ func UpdateLabels(name string, labels map[string]string) error {
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+// GetContainerHostPort returns the host port mapped to the given container port.
+// Returns 0 if no mapping found or container doesn't exist.
+// Works on both running and stopped containers by inspecting HostConfig.
+func GetContainerHostPort(name string, containerPort int) (int, error) {
+	// Use docker inspect to get port bindings - works even when container is stopped
+	portKey := fmt.Sprintf("%d/tcp", containerPort)
+	format := fmt.Sprintf("{{(index .HostConfig.PortBindings \"%s\" 0).HostPort}}", portKey)
+	out, err := exec.Command("docker", "inspect", "-f", format, name).Output()
+	if err != nil {
+		return 0, err
+	}
+	portStr := strings.TrimSpace(string(out))
+	if portStr == "" || portStr == "<no value>" {
+		return 0, fmt.Errorf("no port mapping found")
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		return 0, fmt.Errorf("invalid port number: %s", portStr)
+	}
+	return port, nil
+}
+
+// CommitContainer creates an image from a container's current filesystem state.
+func CommitContainer(name, imageTag string) error {
+	cmd := exec.Command("docker", "commit", name, imageTag)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// GetContainerWorkdir returns the working directory configured for a container.
+func GetContainerWorkdir(name string) (string, error) {
+	out, err := exec.Command("docker", "inspect", "-f", "{{.Config.WorkingDir}}", name).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// GetContainerEnv returns environment variables set on a container as a map.
+func GetContainerEnv(name string) (map[string]string, error) {
+	out, err := exec.Command("docker", "inspect", "-f", "{{json .Config.Env}}", name).Output()
+	if err != nil {
+		return nil, err
+	}
+	var envList []string
+	if err := json.Unmarshal(out, &envList); err != nil {
+		return nil, err
+	}
+	envMap := make(map[string]string)
+	for _, e := range envList {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	return envMap, nil
 }
