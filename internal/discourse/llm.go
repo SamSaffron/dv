@@ -122,6 +122,13 @@ func (c *Client) CreateLLM(input CreateLLMInput) (int64, error) {
 		return 0, fmt.Errorf("decode create response: %w", err)
 	}
 
+	// Make the new LLM available to the AI bot by default.
+	if result.AILLM.ID > 0 {
+		if err := c.AppendAIBotEnabledLLM(result.AILLM.ID); err != nil {
+			c.verboseLog("Warning: failed to append ai_bot_enabled_llms: %v", err)
+		}
+	}
+
 	// Set as default if requested
 	if input.SetAsDefault && result.AILLM.ID > 0 {
 		if err := c.SetDefaultLLM(result.AILLM.ID); err != nil {

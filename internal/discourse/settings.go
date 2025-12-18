@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
+	"strings"
 )
 
 // SiteSetting represents a Discourse site setting
@@ -115,4 +117,124 @@ func (c *Client) GetSiteSettingString(name string) (string, error) {
 	default:
 		return fmt.Sprintf("%v", val), nil
 	}
+}
+
+func isEmptySiteSetting(val interface{}) bool {
+	switch v := val.(type) {
+	case nil:
+		return true
+	case string:
+		s := strings.TrimSpace(v)
+		return s == "" || s == "null" || s == "[]"
+	case []interface{}:
+		return len(v) == 0
+	default:
+		return false
+	}
+}
+
+func parseInt64ListSetting(val interface{}) []int64 {
+	var ids []int64
+	seen := map[int64]struct{}{}
+
+	add := func(id int64) {
+		if id <= 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	switch v := val.(type) {
+	case nil:
+		return nil
+	case float64:
+		add(int64(v))
+	case int64:
+		add(v)
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" || s == "null" || s == "[]" {
+			return nil
+		}
+		parts := strings.FieldsFunc(s, func(r rune) bool {
+			return r == '|' || r == ',' || r == ' ' || r == '\n' || r == '\t'
+		})
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			id, err := strconv.ParseInt(p, 10, 64)
+			if err != nil {
+				continue
+			}
+			add(id)
+		}
+	case []interface{}:
+		for _, raw := range v {
+			switch t := raw.(type) {
+			case float64:
+				add(int64(t))
+			case int64:
+				add(t)
+			case string:
+				id, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64)
+				if err != nil {
+					continue
+				}
+				add(id)
+			}
+		}
+	}
+
+	return ids
+}
+
+func formatInt64ListSetting(ids []int64) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		parts = append(parts, strconv.FormatInt(id, 10))
+	}
+	return strings.Join(parts, "|")
+}
+
+func (c *Client) EnsureAIBotDebuggingAllowedGroupsDefault() error {
+	val, err := c.GetSiteSetting("ai_bot_debugging_allowed_groups")
+	if err != nil {
+		return err
+	}
+
+	if !isEmptySiteSetting(val) {
+		return nil
+	}
+
+	return c.SetSiteSetting("ai_bot_debugging_allowed_groups", "trust_level_0")
+}
+
+func (c *Client) AppendAIBotEnabledLLM(id int64) error {
+	if id <= 0 {
+		return nil
+	}
+
+	val, err := c.GetSiteSetting("ai_bot_enabled_llms")
+	if err != nil {
+		return err
+	}
+
+	ids := parseInt64ListSetting(val)
+	for _, existing := range ids {
+		if existing == id {
+			return nil
+		}
+	}
+	ids = append(ids, id)
+
+	return c.SetSiteSetting("ai_bot_enabled_llms", formatInt64ListSetting(ids))
 }
