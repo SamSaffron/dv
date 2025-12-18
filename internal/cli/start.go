@@ -13,7 +13,7 @@ import (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start [name] [--reset] [--image NAME] [--host-starting-port N] [--container-port N]",
+	Use:   "start [name] [--reset] [--no-remap] [--image NAME] [--host-starting-port N] [--container-port N]",
 	Short: "Create or start a container for the selected image",
 	Args:  cobra.MaximumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -97,9 +97,75 @@ var startCmd = &cobra.Command{
 				registerWithLocalProxy(cmd, cfg, name, proxyHost, containerPort)
 			}
 		} else if !docker.Running(name) {
-			fmt.Fprintf(cmd.OutOrStdout(), "Starting existing container '%s'...\n", name)
-			if err := docker.Start(name); err != nil {
-				return err
+			// Check if container's port is available before starting
+			existingPort, portErr := docker.GetContainerHostPort(name, containerPort)
+			noRemap, _ := cmd.Flags().GetBool("no-remap")
+
+			if portErr == nil && existingPort > 0 && isPortInUse(existingPort) {
+				if noRemap {
+					return fmt.Errorf("port %d is in use; free the port, use --reset to recreate, or remove --no-remap to auto-remap", existingPort)
+				}
+
+				// Find next available port
+				newPort := existingPort
+				for isPortInUse(newPort) {
+					newPort++
+				}
+
+				fmt.Fprintf(cmd.OutOrStdout(), "Port %d in use, remapping to %d...\n", existingPort, newPort)
+
+				// Get container metadata for recreation
+				labels, _ := docker.Labels(name)
+				existingWorkdir, _ := docker.GetContainerWorkdir(name)
+				if existingWorkdir == "" {
+					existingWorkdir = workdir
+				}
+				existingEnvs, _ := docker.GetContainerEnv(name)
+
+				// Commit container to temporary image
+				tempImage := name + "-dv-snapshot"
+				fmt.Fprintf(cmd.OutOrStdout(), "Saving container state...\n")
+				if err := docker.CommitContainer(name, tempImage); err != nil {
+					return fmt.Errorf("failed to snapshot container: %w", err)
+				}
+
+				// Remove old container
+				if err := docker.Remove(name); err != nil {
+					_ = docker.RemoveImage(tempImage)
+					return fmt.Errorf("failed to remove old container: %w", err)
+				}
+
+				// Update DISCOURSE_PORT env if present
+				if existingEnvs == nil {
+					existingEnvs = make(map[string]string)
+				}
+				existingEnvs["DISCOURSE_PORT"] = fmt.Sprintf("%d", newPort)
+
+				// Recreate container with new port from snapshot
+				fmt.Fprintf(cmd.OutOrStdout(), "Recreating container with new port...\n")
+				if err := docker.RunDetached(name, existingWorkdir, tempImage, newPort, containerPort, labels, existingEnvs); err != nil {
+					// Try to restore from snapshot
+					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to recreate, attempting restore...\n")
+					_ = docker.RunDetached(name, existingWorkdir, tempImage, existingPort, containerPort, labels, existingEnvs)
+					_ = docker.RemoveImage(tempImage)
+					return fmt.Errorf("failed to recreate container: %w", err)
+				}
+
+				// Clean up snapshot image (force+quiet since new container references it)
+				_ = docker.RemoveImageQuiet(tempImage)
+
+				// Update proxy registration if needed
+				proxyHost := applyLocalProxyMetadata(cfg, name, newPort, containerPort, labels, existingEnvs)
+				time.Sleep(500 * time.Millisecond)
+				if proxyHost != "" {
+					registerWithLocalProxy(cmd, cfg, name, proxyHost, containerPort)
+				}
+			} else {
+				// Port is free or couldn't determine port, start normally
+				fmt.Fprintf(cmd.OutOrStdout(), "Starting existing container '%s'...\n", name)
+				if err := docker.Start(name); err != nil {
+					return err
+				}
 			}
 			registerContainerFromLabels(cmd, cfg, name)
 		} else {
@@ -123,6 +189,7 @@ var startCmd = &cobra.Command{
 
 func init() {
 	startCmd.Flags().Bool("reset", false, "Stop and remove existing container before starting fresh")
+	startCmd.Flags().Bool("no-remap", false, "Fail instead of auto-remapping when port is in use")
 	startCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
 	startCmd.Flags().Int("host-starting-port", 0, "First host port to try for container port mapping")
 	startCmd.Flags().Int("container-port", 0, "Container port to expose")
