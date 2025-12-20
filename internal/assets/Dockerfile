@@ -5,7 +5,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends vim ripgrep zip inotify-tools chromium
+RUN apt-get install -y --no-install-recommends vim ripgrep zip inotify-tools chromium caddy
 
 RUN chown discourse:discourse /var/www
 RUN sudo -H -u discourse /bin/bash -lc 'git clone https://github.com/discourse/discourse.git /var/www/discourse'
@@ -102,6 +102,37 @@ RUN mkdir -p /etc/runit/3.d && \
 sv stop ember-cli
 EOF
 RUN chmod +x /etc/runit/3.d/02-ember-cli
+
+RUN mkdir -p /etc/service/caddy && \
+    tee /etc/service/caddy/run > /dev/null <<'EOF'
+#!/bin/bash
+caddy trust
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+EOF
+RUN chmod +x /etc/service/caddy/run
+
+RUN mkdir -p /etc/caddy && \
+    tee /etc/caddy/Caddyfile > /dev/null <<'EOF'
+{
+    admin off
+}
+
+:80 {
+    reverse_proxy localhost:4200
+}
+
+:443 {
+    tls internal
+    reverse_proxy localhost:4200
+}
+EOF
+
+RUN mkdir -p /etc/runit/3.d && \
+    tee /etc/runit/3.d/01-caddy > /dev/null <<'EOF'
+#!/bin/bash
+sv stop caddy
+EOF
+RUN chmod +x /etc/runit/3.d/01-caddy
 
 ENV LEFTHOOK=1
 ENV DISCOURSE_DEV_ALLOW_ANON_TO_IMPERSONATE=1

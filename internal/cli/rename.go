@@ -82,6 +82,18 @@ var renameCmd = &cobra.Command{
 			_ = docker.UpdateLabels(newName, map[string]string{
 				localproxy.LabelHost: newHost,
 			})
+
+			// Update /etc/hosts inside the container if it's running
+			if docker.Running(newName) {
+				// Use sed to replace the old host entry or append if it doesn't exist.
+				// We use \b for word boundaries to avoid partial matches.
+				cmdLine := []string{"bash", "-c", fmt.Sprintf(
+					"sed -i 's/\\b%s\\b/%s/g' /etc/hosts; grep -q '\\b%s\\b' /etc/hosts || echo '127.0.0.1 %s' >> /etc/hosts",
+					proxyHost, newHost, newHost, newHost,
+				)}
+				_, _ = docker.ExecAsRoot(newName, "/", cmdLine)
+			}
+
 			if localproxy.Running(cfg.LocalProxy) && containerPort > 0 {
 				_ = localproxy.RemoveRoute(cfg.LocalProxy, proxyHost)
 				registerWithLocalProxy(cmd, cfg, newName, newHost, containerPort)

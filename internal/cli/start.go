@@ -85,8 +85,12 @@ var startCmd = &cobra.Command{
 			envs := map[string]string{
 				"DISCOURSE_PORT": strconv.Itoa(chosenPort),
 			}
+			extraHosts := []string{}
 			proxyHost := applyLocalProxyMetadata(cfg, name, chosenPort, containerPort, labels, envs)
-			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort, labels, envs); err != nil {
+			if proxyHost != "" {
+				extraHosts = append(extraHosts, fmt.Sprintf("%s:127.0.0.1", proxyHost))
+			}
+			if err := docker.RunDetached(name, workdir, imageTag, chosenPort, containerPort, labels, envs, extraHosts); err != nil {
 				return err
 			}
 
@@ -143,10 +147,10 @@ var startCmd = &cobra.Command{
 
 				// Recreate container with new port from snapshot
 				fmt.Fprintf(cmd.OutOrStdout(), "Recreating container with new port...\n")
-				if err := docker.RunDetached(name, existingWorkdir, tempImage, newPort, containerPort, labels, existingEnvs); err != nil {
+				if err := docker.RunDetached(name, existingWorkdir, tempImage, newPort, containerPort, labels, existingEnvs, nil); err != nil {
 					// Try to restore from snapshot
 					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to recreate, attempting restore...\n")
-					_ = docker.RunDetached(name, existingWorkdir, tempImage, existingPort, containerPort, labels, existingEnvs)
+					_ = docker.RunDetached(name, existingWorkdir, tempImage, existingPort, containerPort, labels, existingEnvs, nil)
 					_ = docker.RemoveImage(tempImage)
 					return fmt.Errorf("failed to recreate container: %w", err)
 				}

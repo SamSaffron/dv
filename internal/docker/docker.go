@@ -202,11 +202,15 @@ func ContainerIP(name string) (string, error) {
 	return ip, nil
 }
 
-func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string, envs map[string]string) error {
+func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string, envs map[string]string, extraHosts []string) error {
 	args := []string{"run", "-d",
 		"--name", name,
 		"-w", workdir,
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
+	}
+	// Apply extra hosts
+	for _, h := range extraHosts {
+		args = append(args, "--add-host", h)
 	}
 	// Apply environment variables
 	for k, v := range envs {

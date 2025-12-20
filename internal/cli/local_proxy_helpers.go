@@ -39,6 +39,7 @@ func applyLocalProxyMetadata(cfg config.Config, containerName string, hostPort i
 		envs["DV_LOCAL_PROXY_PORT"] = strconv.Itoa(lp.HTTPSPort)
 		envs["DV_LOCAL_PROXY_HTTPS_PORT"] = strconv.Itoa(lp.HTTPSPort)
 		envs["DISCOURSE_FORCE_HTTPS"] = "true"
+		envs["DISCOURSE_DEV_ALLOW_HTTPS"] = "1"
 		// Override DISCOURSE_PORT so URLs use the external HTTPS port, not the internal one
 		envs["DISCOURSE_PORT"] = strconv.Itoa(lp.HTTPSPort)
 	} else {
