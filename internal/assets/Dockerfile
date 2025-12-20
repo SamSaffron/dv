@@ -5,7 +5,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends vim ripgrep zip inotify-tools chromium caddy
+RUN apt-get install -y --no-install-recommends vim ripgrep zip inotify-tools chromium libnss3-tools curl caddy
 
 RUN chown discourse:discourse /var/www
 RUN sudo -H -u discourse /bin/bash -lc 'git clone https://github.com/discourse/discourse.git /var/www/discourse'
@@ -79,6 +79,12 @@ cd /var/www/discourse
 HOME=/home/discourse USER=discourse exec chpst -u discourse:discourse -U discourse:discourse bin/unicorn >> /var/www/discourse/log/unicorn.log 2>&1
 EOF
 RUN chmod +x /etc/service/unicorn/run
+RUN tee /etc/service/unicorn/finish > /dev/null <<'EOF'
+#!/bin/bash
+pkill -f "unicorn master" || true
+pkill -f "unicorn worker" || true
+EOF
+RUN chmod +x /etc/service/unicorn/finish
 
 RUN mkdir -p /etc/runit/3.d && \
     tee /etc/runit/3.d/03-unicorn > /dev/null <<'EOF'
@@ -95,6 +101,12 @@ cd /var/www/discourse
 HOME=/home/discourse UNICORN_PORT=9292 USER=discourse exec chpst -u discourse:discourse -U discourse:discourse bin/ember-cli
 EOF
 RUN chmod +x /etc/service/ember-cli/run
+RUN tee /etc/service/ember-cli/finish > /dev/null <<'EOF'
+#!/bin/bash
+pkill -f "bin/ember-cli" || true
+pkill -f "node.*ember" || true
+EOF
+RUN chmod +x /etc/service/ember-cli/finish
 
 RUN mkdir -p /etc/runit/3.d && \
     tee /etc/runit/3.d/02-ember-cli > /dev/null <<'EOF'
@@ -110,6 +122,11 @@ caddy trust
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 EOF
 RUN chmod +x /etc/service/caddy/run
+RUN tee /etc/service/caddy/finish > /dev/null <<'EOF'
+#!/bin/bash
+pkill -f "caddy" || true
+EOF
+RUN chmod +x /etc/service/caddy/finish
 
 RUN mkdir -p /etc/caddy && \
     tee /etc/caddy/Caddyfile > /dev/null <<'EOF'

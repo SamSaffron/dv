@@ -58,20 +58,12 @@ var restartDiscourseCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Stopping services (if present)...\n")
 		stopScript := `set -e
 has_service() { [ -d "/etc/service/$1" ]; }
-if has_service unicorn; then sv stop unicorn || true; fi
-if has_service ember-cli; then sv stop ember-cli || true; fi
-if has_service sidekiq; then sv stop sidekiq || true; fi
+if has_service sidekiq; then sv force-stop sidekiq || true; fi
+if has_service unicorn; then sv force-stop unicorn || true; fi
+if has_service ember-cli; then sv force-stop ember-cli || true; fi
+if has_service caddy; then sv force-stop caddy || true; fi
 sleep 1`
 		_, _ = docker.ExecAsRoot(name, workdir, []string{"bash", "-lc", stopScript})
-
-		// Kill leftover app processes owned by 'discourse' (avoid killing runsv)
-		fmt.Fprintf(cmd.OutOrStdout(), "Killing leftover unicorn/sidekiq processes (if any)...\n")
-		killScript := `set -e
-# Only kill processes owned by discourse user to avoid killing runsv
-pkill -u discourse -9 -f 'bin/unicorn' 2>/dev/null || true
-pkill -u discourse -9 -f 'sidekiq' 2>/dev/null || true
-sleep 1`
-		_, _ = docker.ExecAsRoot(name, workdir, []string{"bash", "-lc", killScript})
 
 		// Start available services
 		fmt.Fprintf(cmd.OutOrStdout(), "Starting services (if present)...\n")
@@ -80,6 +72,7 @@ has_service() { [ -d "/etc/service/$1" ]; }
 if has_service sidekiq; then sv start sidekiq || true; fi
 if has_service unicorn; then sv start unicorn || true; fi
 if has_service ember-cli; then sv start ember-cli || true; fi
+if has_service caddy; then sv start caddy || true; fi
 sleep 1`
 		_, _ = docker.ExecAsRoot(name, workdir, []string{"bash", "-lc", startScript})
 
@@ -87,7 +80,7 @@ sleep 1`
 		fmt.Fprintf(cmd.OutOrStdout(), "Service status:\n")
 		statusScript := `set -e
 services=()
-for s in sidekiq unicorn ember-cli; do
+for s in sidekiq unicorn ember-cli caddy; do
   [ -d "/etc/service/$s" ] && services+=("$s")
 done
 if [ ${#services[@]} -gt 0 ]; then

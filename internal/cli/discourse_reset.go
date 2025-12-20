@@ -33,8 +33,8 @@ func buildDatabaseResetCommands() []string {
 	return []string{
 		"echo 'Stopping services (as root): unicorn and ember-cli'",
 		"sudo -n true 2>/dev/null || true",
-		"sudo /usr/bin/sv stop unicorn || sudo sv stop unicorn || true",
-		"sudo /usr/bin/sv stop ember-cli || sudo sv stop ember-cli || true",
+		"sudo /usr/bin/sv force-stop unicorn || sudo sv force-stop unicorn || true",
+		"sudo /usr/bin/sv force-stop ember-cli || sudo sv force-stop ember-cli || true",
 		"echo 'Resetting and migrating databases (development and test)...'",
 		"MIG_LOG_DEV=/tmp/dv-migrate-dev-$(date +%s).log",
 		"MIG_LOG_TEST=/tmp/dv-migrate-test-$(date +%s).log",
