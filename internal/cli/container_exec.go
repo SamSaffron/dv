@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -102,12 +103,97 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 			target := containerPathFor(rule.Container, hostPath)
 			dstDir := filepath.Dir(target)
 			_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
+
+			if rule.MergeKey != "" && strings.HasSuffix(strings.ToLower(hostPath), ".json") {
+				if err := mergeAndCopyJSON(containerName, hostPath, target, rule.MergeKey); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to merge and copy %s to %s: %v\n", hostPath, target, err)
+				}
+				continue
+			}
+
 			if err := docker.CopyToContainerWithOwnership(containerName, hostPath, target, false); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hostPath, target, err)
 				continue
 			}
 		}
 	}
+}
+
+func mergeAndCopyJSON(containerName, hostPath, target, mergeKey string) error {
+	hostData, err := os.ReadFile(hostPath)
+	if err != nil {
+		return err
+	}
+
+	var hostJSON map[string]any
+	if err := json.Unmarshal(hostData, &hostJSON); err != nil {
+		return fmt.Errorf("failed to parse host JSON %s: %w", hostPath, err)
+	}
+
+	// Try to read existing container JSON
+	tmpDir, err := os.MkdirTemp("", "dv-merge-json-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	hostTmp := filepath.Join(tmpDir, "container.json")
+	var containerJSON map[string]any
+
+	if err := docker.CopyFromContainer(containerName, target, hostTmp); err == nil {
+		containerData, err := os.ReadFile(hostTmp)
+		if err == nil && len(containerData) > 0 {
+			_ = json.Unmarshal(containerData, &containerJSON)
+		}
+	}
+
+	if containerJSON == nil {
+		// No existing container JSON or failed to read, just copy host file
+		return docker.CopyToContainerWithOwnership(containerName, hostPath, target, false)
+	}
+
+	// Perform merge: host wins for everything except mergeKey which is merged
+	merged := deepMerge(containerJSON, hostJSON, mergeKey)
+
+	mergedData, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	mergedTmp := filepath.Join(tmpDir, "merged.json")
+	if err := os.WriteFile(mergedTmp, mergedData, 0o644); err != nil {
+		return err
+	}
+
+	return docker.CopyToContainerWithOwnership(containerName, mergedTmp, target, false)
+}
+
+func deepMerge(dst, src map[string]any, mergeKey string) map[string]any {
+	out := make(map[string]any)
+	for k, v := range dst {
+		out[k] = v
+	}
+	for k, v := range src {
+		if k == mergeKey {
+			// Merge the specific key
+			dstVal, dstOk := out[k].(map[string]any)
+			srcVal, srcOk := v.(map[string]any)
+			if dstOk && srcOk {
+				mergedKey := make(map[string]any)
+				for mk, mv := range dstVal {
+					mergedKey[mk] = mv
+				}
+				for mk, mv := range srcVal {
+					mergedKey[mk] = mv
+				}
+				out[k] = mergedKey
+				continue
+			}
+		}
+		// Host (src) wins for other keys or if types don't match for mergeKey
+		out[k] = v
+	}
+	return out
 }
 
 func collectEnvPassthrough(cfg config.Config) []string {

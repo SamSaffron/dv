@@ -21,6 +21,11 @@ var configGetCmd = &cobra.Command{
 	Use:   "get KEY",
 	Short: "Get a config value",
 	Args:  cobra.ExactArgs(1),
+	ValidArgs: []string{
+		"imageTag", "defaultContainerName", "workdir", "customWorkdir",
+		"hostStartingPort", "containerPort", "selectedAgent", "discourseRepo",
+		"extractBranchPrefix",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -44,6 +49,11 @@ var configSetCmd = &cobra.Command{
 	Use:   "set KEY VALUE",
 	Short: "Set a config value",
 	Args:  cobra.ExactArgs(2),
+	ValidArgs: []string{
+		"imageTag", "defaultContainerName", "workdir", "customWorkdir",
+		"hostStartingPort", "containerPort", "selectedAgent", "discourseRepo",
+		"extractBranchPrefix",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
@@ -106,21 +116,43 @@ var configEditCmd = &cobra.Command{
 }
 
 var configResetCmd = &cobra.Command{
-	Use:   "reset",
-	Short: "Reset config to default values",
+	Use:   "reset [KEY]",
+	Short: "Reset config (or a specific key) to default values",
+	Args:  cobra.MaximumNArgs(1),
+	ValidArgs: []string{
+		"copyRules",
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
 			return err
 		}
 
-		cfg := config.Default()
-		if err := config.Save(configDir, cfg); err != nil {
+		if len(args) == 0 {
+			cfg := config.Default()
+			if err := config.Save(configDir, cfg); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Config reset to default values")
+			return nil
+		}
+
+		key := args[0]
+		cfg, err := config.LoadOrCreate(configDir)
+		if err != nil {
 			return err
 		}
 
-		fmt.Fprintln(cmd.OutOrStdout(), "Config reset to default values")
-		return nil
+		switch key {
+		case "copyRules":
+			cfg.CopyRules = config.DefaultCopyRules()
+			fmt.Fprintln(cmd.OutOrStdout(), "Config key 'copyRules' reset to default values")
+		default:
+			// Fallback to checking if we can just set it to default from a new Default config
+			return fmt.Errorf("resetting key %q is not supported yet (try 'dv config reset' for everything)", key)
+		}
+
+		return config.Save(configDir, cfg)
 	},
 }
 

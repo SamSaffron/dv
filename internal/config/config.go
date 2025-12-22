@@ -50,6 +50,7 @@ type CopyRule struct {
 	Host      string   `json:"host"`
 	Container string   `json:"container"`
 	Agents    []string `json:"agents,omitempty"`
+	MergeKey  string   `json:"mergeKey,omitempty"`
 }
 
 // ImageSource describes how to obtain the Dockerfile for an image.
@@ -113,7 +114,7 @@ func Default() Config {
 			},
 		},
 		ContainerImages: map[string]string{},
-		CopyRules:       defaultCopyRules(),
+		CopyRules:       DefaultCopyRules(),
 	}
 }
 
@@ -205,7 +206,7 @@ func valueOrDefault(value int, fallback int) int {
 	return value
 }
 
-func defaultCopyRules() []CopyRule {
+func DefaultCopyRules() []CopyRule {
 	return []CopyRule{
 		{
 			Host:      "~/.codex/auth.json",
@@ -223,13 +224,24 @@ func defaultCopyRules() []CopyRule {
 			Agents:    []string{"gemini"},
 		},
 		{
-			Host:      "~/.gemini/*.json",
-			Container: "/home/discourse/.gemini/",
+			Host:      "~/.gemini/settings.json",
+			Container: "/home/discourse/.gemini/settings.json",
+			Agents:    []string{"gemini"},
+			MergeKey:  "mcpServers",
+		},
+		{
+			Host:      "~/.gemini/google_accounts.json",
+			Container: "/home/discourse/.gemini/google_accounts.json",
+			Agents:    []string{"gemini"},
+		},
+		{
+			Host:      "~/.gemini/oauth_creds.json",
+			Container: "/home/discourse/.gemini/oauth_creds.json",
 			Agents:    []string{"gemini"},
 		},
 		{
 			Host:      "~/.gemini/google_account_id",
-			Container: "/home/discourse/.gemini/",
+			Container: "/home/discourse/google_account_id",
 			Agents:    []string{"gemini"},
 		},
 	}
@@ -257,9 +269,9 @@ func (cfg *Config) migrateCopyFiles() {
 	}
 	switch {
 	case origNil:
-		cfg.CopyRules = appendMissingDefaultCopyRules(cfg.CopyRules, defaultCopyRules())
+		cfg.CopyRules = appendMissingDefaultCopyRules(cfg.CopyRules, DefaultCopyRules())
 	case migrated:
-		cfg.CopyRules = appendMissingDefaultCopyRules(cfg.CopyRules, defaultCopyRules())
+		cfg.CopyRules = appendMissingDefaultCopyRules(cfg.CopyRules, DefaultCopyRules())
 	}
 	cfg.CopyFiles = nil
 }

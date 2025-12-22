@@ -22,6 +22,7 @@ var configMcpCmd = &cobra.Command{
 	ValidArgs: []string{
 		"playwright",
 		"discourse",
+		"chrome-devtools",
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := xdg.ConfigDir()
@@ -80,8 +81,10 @@ var configMcpCmd = &cobra.Command{
 			return configurePlaywrightMCP(cmd, containerName, workdir, envs)
 		case "discourse":
 			return configureDiscourseMCP(cmd, containerName, workdir, envs)
+		case "chrome-devtools":
+			return configureChromeDevToolsMCP(cmd, containerName, workdir, envs)
 		default:
-			return fmt.Errorf("unsupported MCP name: %s (supported: playwright, discourse)", mcpName)
+			return fmt.Errorf("unsupported MCP name: %s (supported: playwright, discourse, chrome-devtools)", mcpName)
 		}
 	},
 }
@@ -156,13 +159,37 @@ func configurePlaywrightMCP(cmd *cobra.Command, containerName, workdir string, e
 		registrationCmd: "claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --isolated --no-sandbox --headless --executable-path /usr/bin/chromium",
 		codexCommand:    "npx",
 		codexArgs:       []string{"-y", "@playwright/mcp@latest", "--isolated", "--no-sandbox", "--headless", "--executable-path", "/usr/bin/chromium"},
+		geminiCommand:   "npx",
+		geminiArgs:      []string{"-y", "@playwright/mcp@latest", "--isolated", "--no-sandbox", "--headless", "--executable-path", "/usr/bin/chromium"},
+	}
+	return configureMCP(cmd, containerName, workdir, envs, mcpConfig)
+}
+
+func configureChromeDevToolsMCP(cmd *cobra.Command, containerName, workdir string, envs []string) error {
+	mcpConfig := mcpConfiguration{
+		name:            "chrome-devtools",
+		registrationCmd: "claude mcp add -s user chrome-devtools -- npx -y chrome-devtools-mcp@latest --headless",
+		codexCommand:    "npx",
+		codexArgs:       []string{"-y", "chrome-devtools-mcp@latest", "--headless"},
+		geminiCommand:   "npx",
+		geminiArgs:      []string{"-y", "chrome-devtools-mcp@latest", "--headless"},
 	}
 	return configureMCP(cmd, containerName, workdir, envs, mcpConfig)
 }
 
 func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, envs []string) error {
-	const profilePath = "/home/discourse/.config/discourse-mcp/local.json"
-	const profileDir = "/home/discourse/.config/discourse-mcp"
+	// Dynamically determine the home directory for the discourse user
+	homeDirRaw, err := docker.ExecOutput(containerName, "/", []string{"bash", "-lc", "echo $HOME"})
+	if err != nil {
+		return fmt.Errorf("failed to determine home directory in container: %w", err)
+	}
+	homeDir := strings.TrimSpace(homeDirRaw)
+	if homeDir == "" {
+		homeDir = "/home/discourse" // fallback
+	}
+
+	profilePath := filepath.Join(homeDir, ".config/discourse-mcp/local.json")
+	profileDir := filepath.Join(homeDir, ".config/discourse-mcp")
 	const siteURL = "http://127.0.0.1:9292"
 	const apiKeyDescription = "dv discourse-mcp"
 
@@ -259,6 +286,8 @@ func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, en
 		registrationCmd: fmt.Sprintf("claude mcp add -s user discourse -- npx -y @discourse/mcp@latest --profile %s", profilePath),
 		codexCommand:    "npx",
 		codexArgs:       []string{"-y", "@discourse/mcp@latest", "--profile", profilePath},
+		geminiCommand:   "npx",
+		geminiArgs:      []string{"-y", "@discourse/mcp@latest", "--profile", profilePath},
 	}
 
 	return configureMCP(cmd, containerName, workdir, envs, mcpConfig)
@@ -266,15 +295,29 @@ func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, en
 
 // mcpConfiguration holds the configuration for setting up an MCP server
 type mcpConfiguration struct {
-	name            string   // MCP server name (e.g., "playwright", "discourse")
-	registrationCmd string   // Command to register with Claude
-	codexCommand    string   // Command for Codex config
-	codexArgs       []string // Arguments for Codex config
+	name            string            // MCP server name (e.g., "playwright", "discourse")
+	registrationCmd string            // Command to register with Claude
+	codexCommand    string            // Command for Codex config
+	codexArgs       []string          // Arguments for Codex config
+	geminiCommand   string            // Command for Gemini config
+	geminiArgs      []string          // Arguments for Gemini config
+	env             map[string]string // Environment variables for the MCP server
 }
 
-// configureMCP registers an MCP server with both Claude and Codex
+// configureMCP registers an MCP server with Claude, Codex, and Gemini
 func configureMCP(cmd *cobra.Command, containerName, workdir string, envs []string, mcpConfig mcpConfiguration) error {
-	const codexConfigPath = "/home/discourse/.codex/config.toml"
+	// Dynamically determine the home directory for the discourse user
+	homeDirRaw, err := docker.ExecOutput(containerName, "/", []string{"bash", "-lc", "echo $HOME"})
+	if err != nil {
+		return fmt.Errorf("failed to determine home directory in container: %w", err)
+	}
+	homeDir := strings.TrimSpace(homeDirRaw)
+	if homeDir == "" {
+		homeDir = "/home/discourse" // fallback
+	}
+
+	codexConfigPath := filepath.Join(homeDir, ".codex/config.toml")
+	geminiConfigPath := filepath.Join(homeDir, ".gemini/settings.json")
 
 	// Remove existing Claude MCP entry
 	removeEchoCmd := fmt.Sprintf("claude mcp remove -s user %s", mcpConfig.name)
@@ -294,51 +337,108 @@ func configureMCP(cmd *cobra.Command, containerName, workdir string, envs []stri
 		return err
 	}
 
+	tmpDir, err := os.MkdirTemp("", "mcp-config-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
 	// Configure Codex
 	fmt.Fprintf(cmd.OutOrStdout(), "\nConfiguring Codex to use the %s MCP (updating ~/.codex/config.toml)...\n", mcpConfig.name)
 
 	_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.codex"})
 	existsOut, _ := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "test -f " + codexConfigPath + " && echo EXISTS || echo MISSING"})
-	hasConfig := strings.Contains(existsOut, "EXISTS")
+	hasCodexConfig := strings.Contains(existsOut, "EXISTS")
 
-	tmpDir, err := os.MkdirTemp("", "codex-config-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmpDir)
-	hostCfg := filepath.Join(tmpDir, "config.toml")
-
-	var content string
-	if hasConfig {
-		if err := docker.CopyFromContainer(containerName, codexConfigPath, hostCfg); err != nil {
+	hostCodexCfg := filepath.Join(tmpDir, "codex-config.toml")
+	var codexContent string
+	if hasCodexConfig {
+		if err := docker.CopyFromContainer(containerName, codexConfigPath, hostCodexCfg); err != nil {
 			return fmt.Errorf("failed to copy existing Codex config: %w", err)
 		}
-		b, err := os.ReadFile(hostCfg)
+		b, err := os.ReadFile(hostCodexCfg)
 		if err != nil {
 			return err
 		}
-		content = string(b)
+		codexContent = string(b)
 	}
 
-	sectionHeader := fmt.Sprintf("mcp_servers.%s", mcpConfig.name)
+	codexSectionHeader := fmt.Sprintf("mcp_servers.%s", mcpConfig.name)
 	argsJSON, err := json.Marshal(mcpConfig.codexArgs)
 	if err != nil {
 		return fmt.Errorf("failed to marshal codex args: %w", err)
 	}
-	sectionBody := strings.Join([]string{
-		"[" + sectionHeader + "]",
+	codexSectionBody := strings.Join([]string{
+		"[" + codexSectionHeader + "]",
 		fmt.Sprintf("command = %q", mcpConfig.codexCommand),
 		fmt.Sprintf("args = %s", string(argsJSON)),
 		"",
 	}, "\n")
 
-	updated := addOrReplaceTomlSection(content, sectionHeader, sectionBody)
-	if err := os.WriteFile(hostCfg, []byte(updated), 0o644); err != nil {
+	codexUpdated := addOrReplaceTomlSection(codexContent, codexSectionHeader, codexSectionBody)
+	if err := os.WriteFile(hostCodexCfg, []byte(codexUpdated), 0o644); err != nil {
 		return err
 	}
 
-	if err := docker.CopyToContainerWithOwnership(containerName, hostCfg, codexConfigPath, false); err != nil {
+	if err := docker.CopyToContainerWithOwnership(containerName, hostCodexCfg, codexConfigPath, false); err != nil {
 		return fmt.Errorf("failed to copy Codex config into container: %w", err)
+	}
+
+	// Configure Gemini
+	fmt.Fprintf(cmd.OutOrStdout(), "\nConfiguring Gemini CLI to use the %s MCP (updating ~/.gemini/settings.json)...\n", mcpConfig.name)
+
+	_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.gemini"})
+	existsOut, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "test -f " + geminiConfigPath + " && echo EXISTS || echo MISSING"})
+	hasGeminiConfig := strings.Contains(existsOut, "EXISTS")
+
+	hostGeminiCfg := filepath.Join(tmpDir, "gemini-settings.json")
+	geminiSettings := map[string]any{}
+
+	if hasGeminiConfig {
+		if err := docker.CopyFromContainer(containerName, geminiConfigPath, hostGeminiCfg); err != nil {
+			return fmt.Errorf("failed to copy existing Gemini settings: %w", err)
+		}
+		b, err := os.ReadFile(hostGeminiCfg)
+		if err != nil {
+			return err
+		}
+		if len(b) > 0 {
+			if err := json.Unmarshal(b, &geminiSettings); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: existing Gemini settings are invalid JSON, regenerating: %v\n", err)
+				geminiSettings = map[string]any{}
+			}
+		}
+	}
+
+	mcpServersRaw, ok := geminiSettings["mcpServers"]
+	var mcpServers map[string]any
+	if ok {
+		mcpServers, _ = mcpServersRaw.(map[string]any)
+	}
+	if mcpServers == nil {
+		mcpServers = map[string]any{}
+	}
+
+	serverCfg := map[string]any{
+		"command": mcpConfig.geminiCommand,
+		"args":    mcpConfig.geminiArgs,
+	}
+	if len(mcpConfig.env) > 0 {
+		serverCfg["env"] = mcpConfig.env
+	}
+	mcpServers[mcpConfig.name] = serverCfg
+	geminiSettings["mcpServers"] = mcpServers
+
+	geminiUpdated, err := json.MarshalIndent(geminiSettings, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(hostGeminiCfg, geminiUpdated, 0o644); err != nil {
+		return err
+	}
+
+	if err := docker.CopyToContainerWithOwnership(containerName, hostGeminiCfg, geminiConfigPath, false); err != nil {
+		return fmt.Errorf("failed to copy Gemini settings into container: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%s MCP configuration complete.\n", strings.Title(mcpConfig.name))
