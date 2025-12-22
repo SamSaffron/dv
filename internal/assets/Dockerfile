@@ -138,7 +138,7 @@ RUN mkdir -p /etc/caddy && \
     reverse_proxy localhost:4200
 }
 
-:443 {
+*.dv.localhost {
     tls internal
     reverse_proxy localhost:4200
 }
