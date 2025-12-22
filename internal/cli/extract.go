@@ -124,6 +124,20 @@ var extractCmd = &cobra.Command{
 		if customDir != "" {
 			localRepo = customDir
 		}
+		if syncMode {
+			cleanup, err := registerExtractSync(cmd, syncOptions{
+				containerName:    name,
+				containerWorkdir: work,
+				localRepo:        localRepo,
+				logOut:           logOut,
+				errOut:           cmd.ErrOrStderr(),
+				debug:            syncDebug,
+			})
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+		}
 		repoCloneUrl := cfg.DiscourseRepo
 		if _, err := os.Stat(localRepo); os.IsNotExist(err) {
 			// Prefer SSH when possible; fall back to HTTPS

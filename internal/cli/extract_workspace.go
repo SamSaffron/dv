@@ -42,6 +42,20 @@ func extractWorkspaceRepo(opts workspaceExtractOptions) error {
 	if !isRepo {
 		return copyWorkspaceDirectory(opts, logOut, "Workspace is not a git repository", false)
 	}
+	if opts.syncMode {
+		cleanup, err := registerExtractSync(opts.cmd, syncOptions{
+			containerName:    opts.containerName,
+			containerWorkdir: opts.containerWorkdir,
+			localRepo:        opts.localRepo,
+			logOut:           logOut,
+			errOut:           opts.cmd.ErrOrStderr(),
+			debug:            opts.syncDebug,
+		})
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+	}
 
 	status, err := docker.ExecOutput(opts.containerName, opts.containerWorkdir, []string{"bash", "-lc", "git status --porcelain"})
 	if err != nil {
