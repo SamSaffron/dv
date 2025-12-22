@@ -69,8 +69,9 @@ var startCmd = &cobra.Command{
 
 		if !docker.Exists(name) {
 			// Find the first available host port, starting from hostPort
+			allocated, _ := docker.AllocatedPorts()
 			chosenPort := hostPort
-			for isPortInUse(chosenPort) {
+			for isPortInUse(chosenPort, allocated) {
 				chosenPort++
 			}
 			if chosenPort != hostPort {
@@ -105,67 +106,79 @@ var startCmd = &cobra.Command{
 			existingPort, portErr := docker.GetContainerHostPort(name, containerPort)
 			noRemap, _ := cmd.Flags().GetBool("no-remap")
 
-			if portErr == nil && existingPort > 0 && isPortInUse(existingPort) {
-				if noRemap {
-					return fmt.Errorf("port %d is in use; free the port, use --reset to recreate, or remove --no-remap to auto-remap", existingPort)
-				}
+			allocated, _ := docker.AllocatedPorts()
+			if portErr == nil && existingPort > 0 {
+				// Remove our own port from the check to avoid false positive remapping
+				delete(allocated, existingPort)
 
-				// Find next available port
-				newPort := existingPort
-				for isPortInUse(newPort) {
-					newPort++
-				}
+				if isPortInUse(existingPort, allocated) {
+					if noRemap {
+						return fmt.Errorf("port %d is in use; free the port, use --reset to recreate, or remove --no-remap to auto-remap", existingPort)
+					}
 
-				fmt.Fprintf(cmd.OutOrStdout(), "Port %d in use, remapping to %d...\n", existingPort, newPort)
+					// Find next available port
+					newPort := existingPort
+					for isPortInUse(newPort, allocated) {
+						newPort++
+					}
 
-				// Get container metadata for recreation
-				labels, _ := docker.Labels(name)
-				existingWorkdir, _ := docker.GetContainerWorkdir(name)
-				if existingWorkdir == "" {
-					existingWorkdir = workdir
-				}
-				existingEnvs, _ := docker.GetContainerEnv(name)
+					fmt.Fprintf(cmd.OutOrStdout(), "Port %d in use, remapping to %d...\n", existingPort, newPort)
 
-				// Commit container to temporary image
-				tempImage := name + "-dv-snapshot"
-				fmt.Fprintf(cmd.OutOrStdout(), "Saving container state...\n")
-				if err := docker.CommitContainer(name, tempImage); err != nil {
-					return fmt.Errorf("failed to snapshot container: %w", err)
-				}
+					// Get container metadata for recreation
+					labels, _ := docker.Labels(name)
+					existingWorkdir, _ := docker.GetContainerWorkdir(name)
+					if existingWorkdir == "" {
+						existingWorkdir = workdir
+					}
+					existingEnvs, _ := docker.GetContainerEnv(name)
 
-				// Remove old container
-				if err := docker.Remove(name); err != nil {
-					_ = docker.RemoveImage(tempImage)
-					return fmt.Errorf("failed to remove old container: %w", err)
-				}
+					// Commit container to temporary image
+					tempImage := name + "-dv-snapshot"
+					fmt.Fprintf(cmd.OutOrStdout(), "Saving container state...\n")
+					if err := docker.CommitContainer(name, tempImage); err != nil {
+						return fmt.Errorf("failed to snapshot container: %w", err)
+					}
 
-				// Update DISCOURSE_PORT env if present
-				if existingEnvs == nil {
-					existingEnvs = make(map[string]string)
-				}
-				existingEnvs["DISCOURSE_PORT"] = fmt.Sprintf("%d", newPort)
+					// Remove old container
+					if err := docker.Remove(name); err != nil {
+						_ = docker.RemoveImage(tempImage)
+						return fmt.Errorf("failed to remove old container: %w", err)
+					}
 
-				// Recreate container with new port from snapshot
-				fmt.Fprintf(cmd.OutOrStdout(), "Recreating container with new port...\n")
-				if err := docker.RunDetached(name, existingWorkdir, tempImage, newPort, containerPort, labels, existingEnvs, nil); err != nil {
-					// Try to restore from snapshot
-					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to recreate, attempting restore...\n")
-					_ = docker.RunDetached(name, existingWorkdir, tempImage, existingPort, containerPort, labels, existingEnvs, nil)
-					_ = docker.RemoveImage(tempImage)
-					return fmt.Errorf("failed to recreate container: %w", err)
-				}
+					// Update DISCOURSE_PORT env if present
+					if existingEnvs == nil {
+						existingEnvs = make(map[string]string)
+					}
+					existingEnvs["DISCOURSE_PORT"] = fmt.Sprintf("%d", newPort)
 
-				// Clean up snapshot image (force+quiet since new container references it)
-				_ = docker.RemoveImageQuiet(tempImage)
+					// Recreate container with new port from snapshot
+					fmt.Fprintf(cmd.OutOrStdout(), "Recreating container with new port...\n")
+					if err := docker.RunDetached(name, existingWorkdir, tempImage, newPort, containerPort, labels, existingEnvs, nil); err != nil {
+						// Try to restore from snapshot
+						fmt.Fprintf(cmd.ErrOrStderr(), "Failed to recreate, attempting restore...\n")
+						_ = docker.RunDetached(name, existingWorkdir, tempImage, existingPort, containerPort, labels, existingEnvs, nil)
+						_ = docker.RemoveImage(tempImage)
+						return fmt.Errorf("failed to recreate container: %w", err)
+					}
 
-				// Update proxy registration if needed
-				proxyHost := applyLocalProxyMetadata(cfg, name, newPort, containerPort, labels, existingEnvs)
-				time.Sleep(500 * time.Millisecond)
-				if proxyHost != "" {
-					registerWithLocalProxy(cmd, cfg, name, proxyHost, containerPort)
+					// Clean up snapshot image (force+quiet since new container references it)
+					_ = docker.RemoveImageQuiet(tempImage)
+
+					// Update proxy registration if needed
+					proxyHost := applyLocalProxyMetadata(cfg, name, newPort, containerPort, labels, existingEnvs)
+					time.Sleep(500 * time.Millisecond)
+					if proxyHost != "" {
+						registerWithLocalProxy(cmd, cfg, name, proxyHost, containerPort)
+					}
+				} else {
+					// Port is free, start normally
+					fmt.Fprintf(cmd.OutOrStdout(), "Starting existing container '%s'...\n", name)
+					if err := docker.Start(name); err != nil {
+						return err
+					}
 				}
 			} else {
-				// Port is free or couldn't determine port, start normally
+				// Couldn't determine port, start normally
 				fmt.Fprintf(cmd.OutOrStdout(), "Starting existing container '%s'...\n", name)
 				if err := docker.Start(name); err != nil {
 					return err

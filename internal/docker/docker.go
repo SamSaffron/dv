@@ -396,6 +396,27 @@ func CommitContainer(name, imageTag string) error {
 	return cmd.Run()
 }
 
+// AllocatedPorts returns a set of all host ports currently allocated by Docker
+// containers (running or stopped).
+func AllocatedPorts() (map[int]bool, error) {
+	// Use docker inspect to get all port bindings for all containers
+	format := "{{range $p, $conf := .HostConfig.PortBindings}}{{(index $conf 0).HostPort}} {{end}}"
+	out, err := exec.Command("bash", "-lc", "docker ps -aq | xargs -r docker inspect -f '"+format+"'").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	ports := make(map[int]bool)
+	fields := strings.Fields(string(out))
+	for _, f := range fields {
+		var p int
+		if _, err := fmt.Sscanf(f, "%d", &p); err == nil {
+			ports[p] = true
+		}
+	}
+	return ports, nil
+}
+
 // GetContainerWorkdir returns the working directory configured for a container.
 func GetContainerWorkdir(name string) (string, error) {
 	out, err := exec.Command("docker", "inspect", "-f", "{{.Config.WorkingDir}}", name).Output()

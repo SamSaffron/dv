@@ -48,13 +48,29 @@ func resolveImage(cfg config.Config, override string) (string, config.ImageConfi
 	return name, img, nil
 }
 
-// isPortInUse returns true when the given TCP port cannot be bound on localhost.
-func isPortInUse(port int) bool {
+// isPortInUse returns true when the given TCP port cannot be bound on localhost
+// or is already allocated to a Docker container.
+func isPortInUse(port int, dockerAllocated map[int]bool) bool {
+	if dockerAllocated != nil && dockerAllocated[port] {
+		return true
+	}
+	// Try to listen on all interfaces. This is the most conservative check.
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return true
 	}
 	_ = l.Close()
+
+	// Also specifically check 127.0.0.1 and [::1] because sometimes ':' only
+	// binds to one of them depending on system configuration.
+	for _, host := range []string{"127.0.0.1", "[::1]"} {
+		l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
+		if err != nil {
+			return true
+		}
+		_ = l.Close()
+	}
+
 	return false
 }
 
@@ -155,8 +171,9 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 	}
 	if !docker.Exists(name) {
 		// Choose the first available port starting from configured starting port
+		allocated, _ := docker.AllocatedPorts()
 		chosenPort := cfg.HostStartingPort
-		for isPortInUse(chosenPort) {
+		for isPortInUse(chosenPort, allocated) {
 			chosenPort++
 		}
 		labels := map[string]string{
