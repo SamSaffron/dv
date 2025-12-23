@@ -148,6 +148,10 @@ var buildCmd = &cobra.Command{
 		}
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Building Docker image as: %s\n", imageTag)
+
+		// Always try to pull base images first; continue on failure as requested
+		docker.PullBaseImages(dockerfilePath, cmd.OutOrStdout())
+
 		opts := docker.BuildOptions{
 			ExtraArgs:    pass,
 			ForceClassic: disableBuildKit,

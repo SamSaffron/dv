@@ -67,6 +67,7 @@ func Rename(oldName, newName string) error {
 	return cmd.Run()
 }
 
+// Pull applies to an image ref (repo:tag or repo@digest)
 func Pull(ref string) error {
 	if isTruthyEnv("DV_VERBOSE") {
 		fmt.Fprintf(os.Stderr, "Running: docker pull %s\n", ref)
@@ -74,6 +75,60 @@ func Pull(ref string) error {
 	cmd := exec.Command("docker", "pull", ref)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+// PullBaseImages parses the Dockerfile at path and attempts to pull all unique
+// images found in FROM instructions. It ignores images that refer to
+// build stages (AS ...). It prints warnings to stderr on failure but returns nil.
+func PullBaseImages(dockerfilePath string, out io.Writer) {
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return
+	}
+
+	stages := make(map[string]bool)
+	var toPull []string
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		upper := strings.ToUpper(trimmed)
+		if !strings.HasPrefix(upper, "FROM") {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		// FROM [--platform=...] image [AS name]
+		idx := 1
+		if idx < len(fields) && strings.HasPrefix(fields[idx], "--platform=") {
+			idx++
+		}
+		if idx < len(fields) {
+			image := fields[idx]
+			if image != "scratch" && !stages[image] && !strings.Contains(image, "$") {
+				toPull = append(toPull, image)
+			}
+			// Check for AS name
+			for i := idx + 1; i < len(fields); i++ {
+				if strings.ToUpper(fields[i]) == "AS" && i+1 < len(fields) {
+					stages[fields[i+1]] = true
+					break
+				}
+			}
+		}
+	}
+
+	// Pull unique images
+	pulled := make(map[string]bool)
+	for _, img := range toPull {
+		if pulled[img] {
+			continue
+		}
+		fmt.Fprintf(out, "Pulling latest base image %s...\n", img)
+		if err := Pull(img); err != nil {
+			fmt.Fprintf(out, "Warning: failed to pull %s (%v); continuing with local version if available.\n", img, err)
+		}
+		pulled[img] = true
+	}
 }
 
 func Build(tag string, args []string) error {
