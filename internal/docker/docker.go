@@ -208,6 +208,9 @@ func RunDetached(name, workdir, image string, hostPort, containerPort int, label
 		"-w", workdir,
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 	}
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker %s\n", strings.Join(args, " "))
+	}
 	// Apply extra hosts
 	for _, h := range extraHosts {
 		args = append(args, "--add-host", h)
@@ -397,13 +400,28 @@ func CommitContainer(name, imageTag string) error {
 }
 
 // AllocatedPorts returns a set of all host ports currently allocated by Docker
-// containers (running or stopped).
+// containers (running or stopped). It uses a more robust approach by listing
+// all containers and inspecting them individually to avoid failing on a single
+// malformed container.
 func AllocatedPorts() (map[int]bool, error) {
-	// Use docker inspect to get all port bindings for all containers
-	format := "{{range $p, $conf := .HostConfig.PortBindings}}{{(index $conf 0).HostPort}} {{end}}"
-	out, err := exec.Command("bash", "-lc", "docker ps -aq | xargs -r docker inspect -f '"+format+"'").Output()
+	// 1. Get all container IDs
+	out, err := exec.Command("docker", "ps", "-aq").Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return make(map[int]bool), nil
+	}
+
+	// 2. Inspect all containers at once with a template that handles multiple ports
+	format := "{{range $p, $conf := .HostConfig.PortBindings}}{{(index $conf 0).HostPort}} {{end}}"
+	args := append([]string{"inspect", "-f", format}, ids...)
+	out, err = exec.Command("docker", args...).Output()
+	if err != nil {
+		// If batch inspect fails, fallback to one-by-one to be resilient
+		return allocatedPortsOneByOne(ids)
 	}
 
 	ports := make(map[int]bool)
@@ -412,6 +430,25 @@ func AllocatedPorts() (map[int]bool, error) {
 		var p int
 		if _, err := fmt.Sscanf(f, "%d", &p); err == nil {
 			ports[p] = true
+		}
+	}
+	return ports, nil
+}
+
+func allocatedPortsOneByOne(ids []string) (map[int]bool, error) {
+	ports := make(map[int]bool)
+	format := "{{range $p, $conf := .HostConfig.PortBindings}}{{(index $conf 0).HostPort}} {{end}}"
+	for _, id := range ids {
+		out, err := exec.Command("docker", "inspect", "-f", format, id).Output()
+		if err != nil {
+			continue // skip malformed or missing containers
+		}
+		fields := strings.Fields(string(out))
+		for _, f := range fields {
+			var p int
+			if _, err := fmt.Sscanf(f, "%d", &p); err == nil {
+				ports[p] = true
+			}
 		}
 	}
 	return ports, nil

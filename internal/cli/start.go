@@ -69,10 +69,21 @@ var startCmd = &cobra.Command{
 
 		if !docker.Exists(name) {
 			// Find the first available host port, starting from hostPort
-			allocated, _ := docker.AllocatedPorts()
+			allocated, err := docker.AllocatedPorts()
+			if err != nil {
+				if isTruthyEnv("DV_VERBOSE") {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to detect allocated Docker ports: %v\n", err)
+				}
+			}
 			chosenPort := hostPort
+			if isTruthyEnv("DV_VERBOSE") {
+				fmt.Fprintf(cmd.OutOrStdout(), "Searching for an available port starting from %d...\n", chosenPort)
+			}
 			for isPortInUse(chosenPort, allocated) {
 				chosenPort++
+			}
+			if isTruthyEnv("DV_VERBOSE") {
+				fmt.Fprintf(cmd.OutOrStdout(), "Selected port %d.\n", chosenPort)
 			}
 			if chosenPort != hostPort {
 				fmt.Fprintf(cmd.OutOrStdout(), "Port %d in use, using %d.\n", hostPort, chosenPort)

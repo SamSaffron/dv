@@ -36,6 +36,9 @@ var newCmd = &cobra.Command{
 		}
 		cfg.SelectedAgent = name
 
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(cmd.OutOrStdout(), "Resolving image for agent '%s' (image override: '%s')...\n", name, imageOverride)
+		}
 		// Determine which image to use
 		imgName, imgCfg, err := resolveImage(cfg, imageOverride)
 		if err != nil {
@@ -44,6 +47,9 @@ var newCmd = &cobra.Command{
 		imageTag := imgCfg.Tag
 		workdir := imgCfg.Workdir
 
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(cmd.OutOrStdout(), "Saving config with selected agent '%s'...\n", name)
+		}
 		if err := config.Save(configDir, cfg); err != nil {
 			return err
 		}
@@ -54,6 +60,9 @@ var newCmd = &cobra.Command{
 		}
 		if cfg.ContainerImages == nil {
 			cfg.ContainerImages = map[string]string{}
+		}
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(cmd.OutOrStdout(), "Updating container-image mapping for '%s' to '%s'...\n", name, imgName)
 		}
 		cfg.ContainerImages[name] = imgName
 		_ = config.Save(configDir, cfg)

@@ -16,6 +16,17 @@ import (
 	"dv/internal/xdg"
 )
 
+// isTruthyEnv returns true for truthy environment variable values.
+func isTruthyEnv(key string) bool {
+	val := strings.TrimSpace(os.Getenv(key))
+	switch strings.ToLower(val) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func currentAgentName(cfg config.Config) string {
 	name := cfg.SelectedAgent
 	if name == "" {
@@ -52,11 +63,17 @@ func resolveImage(cfg config.Config, override string) (string, config.ImageConfi
 // or is already allocated to a Docker container.
 func isPortInUse(port int, dockerAllocated map[int]bool) bool {
 	if dockerAllocated != nil && dockerAllocated[port] {
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(os.Stderr, "Port %d is already allocated by a Docker container\n", port)
+		}
 		return true
 	}
 	// Try to listen on all interfaces. This is the most conservative check.
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(os.Stderr, "Port %d is in use (Listen :%d failed: %v)\n", port, port, err)
+		}
 		return true
 	}
 	_ = l.Close()
@@ -66,6 +83,9 @@ func isPortInUse(port int, dockerAllocated map[int]bool) bool {
 	for _, host := range []string{"127.0.0.1", "[::1]"} {
 		l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 		if err != nil {
+			if isTruthyEnv("DV_VERBOSE") {
+				fmt.Fprintf(os.Stderr, "Port %d is in use (Listen %s:%d failed: %v)\n", port, host, port, err)
+			}
 			return true
 		}
 		_ = l.Close()
@@ -171,10 +191,21 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 	}
 	if !docker.Exists(name) {
 		// Choose the first available port starting from configured starting port
-		allocated, _ := docker.AllocatedPorts()
+		allocated, err := docker.AllocatedPorts()
+		if err != nil {
+			if isTruthyEnv("DV_VERBOSE") {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to detect allocated Docker ports: %v\n", err)
+			}
+		}
 		chosenPort := cfg.HostStartingPort
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(cmd.OutOrStdout(), "Searching for an available port starting from %d...\n", chosenPort)
+		}
 		for isPortInUse(chosenPort, allocated) {
 			chosenPort++
+		}
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(cmd.OutOrStdout(), "Selected port %d.\n", chosenPort)
 		}
 		labels := map[string]string{
 			"com.dv.owner":      "dv",
