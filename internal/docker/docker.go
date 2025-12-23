@@ -32,30 +32,45 @@ func Running(name string) bool {
 }
 
 func Stop(name string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker stop %s\n", name)
+	}
 	cmd := exec.Command("docker", "stop", name)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
 func Remove(name string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker rm %s\n", name)
+	}
 	cmd := exec.Command("docker", "rm", name)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
 func RemoveForce(name string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker rm -f %s\n", name)
+	}
 	cmd := exec.Command("docker", "rm", "-f", name)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
 func Rename(oldName, newName string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker rename %s %s\n", oldName, newName)
+	}
 	cmd := exec.Command("docker", "rename", oldName, newName)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
 func Pull(ref string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker pull %s\n", ref)
+	}
 	cmd := exec.Command("docker", "pull", ref)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
@@ -65,6 +80,9 @@ func Build(tag string, args []string) error {
 	argv := []string{"build", "-t", tag}
 	argv = append(argv, args...)
 	argv = append(argv, ".")
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker %s\n", strings.Join(argv, " "))
+	}
 	cmd := exec.Command("docker", argv...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
@@ -107,6 +125,9 @@ func runClassicBuild(tag, dockerfilePath, contextDir string, args []string) erro
 	argv := []string{"build", "-t", tag, "-f", dockerfilePath}
 	argv = append(argv, args...)
 	argv = append(argv, contextDir)
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker %s\n", strings.Join(argv, " "))
+	}
 	cmd := exec.Command("docker", argv...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
@@ -120,6 +141,9 @@ func runBuildx(tag, dockerfilePath, contextDir string, opts BuildOptions) error 
 	}
 	argv = append(argv, opts.ExtraArgs...)
 	argv = append(argv, contextDir)
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker %s\n", strings.Join(argv, " "))
+	}
 	cmd := exec.Command("docker", argv...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
@@ -163,6 +187,9 @@ func ImageExists(tag string) bool {
 }
 
 func RemoveImage(tag string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker rmi %s\n", tag)
+	}
 	cmd := exec.Command("docker", "rmi", tag)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
@@ -171,6 +198,9 @@ func RemoveImage(tag string) error {
 // RemoveImageQuiet removes an image, suppressing output and errors.
 // Useful for cleanup where failure is acceptable.
 func RemoveImageQuiet(tag string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker rmi -f %s\n", tag)
+	}
 	cmd := exec.Command("docker", "rmi", "-f", tag)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	return cmd.Run()
@@ -178,12 +208,18 @@ func RemoveImageQuiet(tag string) error {
 
 // TagImage applies a new tag to an existing image (docker tag src dst)
 func TagImage(srcTag, dstTag string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker tag %s %s\n", srcTag, dstTag)
+	}
 	cmd := exec.Command("docker", "tag", srcTag, dstTag)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
 func Start(name string) error {
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker start %s\n", name)
+	}
 	cmd := exec.Command("docker", "start", name)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
