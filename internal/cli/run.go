@@ -27,10 +27,13 @@ var runCmd = &cobra.Command{
 		}
 
 		asRoot, _ := cmd.Flags().GetBool("root")
+		shellCmd := shellJoin(execArgs)
+		finalArgs := []string{"bash", "-lc", shellCmd}
+
 		if asRoot {
-			return docker.ExecInteractiveAsRoot(ctx.name, ctx.workdir, ctx.envs, execArgs)
+			return docker.ExecInteractiveAsRoot(ctx.name, ctx.workdir, ctx.envs, finalArgs)
 		}
-		return docker.ExecInteractive(ctx.name, ctx.workdir, ctx.envs, execArgs)
+		return docker.ExecInteractive(ctx.name, ctx.workdir, ctx.envs, finalArgs)
 	},
 }
 

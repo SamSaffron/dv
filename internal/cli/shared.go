@@ -172,6 +172,20 @@ func containerImage(name string) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// shellQuote returns a single-quoted shell-safe string.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+// shellJoin quotes argv for safe execution in a single shell command.
+func shellJoin(argv []string) string {
+	quoted := make([]string, 0, len(argv))
+	for _, a := range argv {
+		quoted = append(quoted, shellQuote(a))
+	}
+	return strings.Join(quoted, " ")
+}
+
 func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, reset bool, sshAuthSock string) error {
 	// Fallback: if container has a recorded image, use that; else use selected image
 	imgName := cfg.ContainerImages[name]

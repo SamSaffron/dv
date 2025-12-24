@@ -237,10 +237,8 @@ func expandHostSources(p string) []string {
 	return []string{expanded}
 }
 
-// shellQuote returns a single-quoted shell-safe string.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
+// shellQuote is now in shared.go
+
 
 func ruleMatchesAgent(rule config.CopyRule, agent string) bool {
 	if len(rule.Agents) == 0 {

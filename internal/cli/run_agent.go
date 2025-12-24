@@ -393,14 +393,7 @@ var agentRules = map[string]agentRule{
 	},
 }
 
-// shellJoin quotes argv for safe execution in a single shell command.
-func shellJoin(argv []string) string {
-	quoted := make([]string, 0, len(argv))
-	for _, a := range argv {
-		quoted = append(quoted, shellQuote(a))
-	}
-	return strings.Join(quoted, " ")
-}
+// shellJoin and shellQuote are now in shared.go
 
 // withUserPaths prefixes a shell command with PATH extensions for common user-level bin dirs.
 func withUserPaths(cmd string) string {

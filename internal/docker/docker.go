@@ -332,8 +332,8 @@ func RunDetached(name, workdir, image string, hostPort, containerPort int, label
 
 func ExecInteractive(name, workdir string, envs []string, argv []string) error {
 	args := []string{"exec", "-i", "--user", "discourse", "-w", workdir}
-	// Add -t only when stdout is a TTY
-	if term.IsTerminal(int(os.Stdout.Fd())) {
+	// Add -t only when both stdin and stdout are TTYs
+	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 		args = append([]string{"exec", "-t"}, args[1:]...)
 	}
 	for _, e := range envs {
@@ -349,8 +349,8 @@ func ExecInteractive(name, workdir string, envs []string, argv []string) error {
 // ExecInteractiveAsRoot runs an interactive command inside the container as root.
 func ExecInteractiveAsRoot(name, workdir string, envs []string, argv []string) error {
 	args := []string{"exec", "-i", "--user", "root", "-w", workdir}
-	// Add -t only when stdout is a TTY
-	if term.IsTerminal(int(os.Stdout.Fd())) {
+	// Add -t only when both stdin and stdout are TTYs
+	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 		args = append([]string{"exec", "-t"}, args[1:]...)
 	}
 	for _, e := range envs {
