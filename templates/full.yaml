@@ -1,0 +1,73 @@
+# templates/full.yaml
+# This template covers all the features available in dv templates.
+# Use it as a reference when creating your own templates.
+
+# 1. Discourse Foundation
+# You can specify a branch, a PR, or even a custom repository.
+discourse:
+  branch: main
+  # pr: 12345   # PR number to checkout (mutually exclusive with branch)
+  # repo: https://github.com/discourse/discourse.git
+
+# 2. Git Configuration
+git:
+  # Enable SSH agent forwarding so the container can access your private repos.
+  # Requires SSH_AUTH_SOCK to be set on your host.
+  ssh_forward: true
+
+# 3. Environment Variables
+# These will be set inside the container for all future commands.
+env:
+  MY_CUSTOM_VAR: "hello world"
+  ANOTHER_VAR: "true"
+
+# 4. Copy Rules
+# Map host files or directories into the container.
+# Paths are expanded (e.g., ~) and can be relative to the workspace.
+copy:
+  - host: "~/.gitconfig"
+    container: "/home/discourse/.gitconfig"
+  - host: "./README.md"
+    container: "/home/discourse/README-from-host.md"
+
+# 5. Plugins
+# Specify additional plugins to be cloned into the container.
+plugins:
+  - repo: https://github.com/discourse/discourse-solved.git
+    branch: main
+    # path: plugins/discourse-solved # Default: plugins/<repo-name>
+  - repo: https://github.com/discourse/discourse-voting.git
+
+# 6. Themes
+# Install themes or theme components.
+themes:
+  - repo: https://github.com/discourse/discourse-canvas-theme.git
+    name: "Canvas Theme"
+    auto_watch: true # Automatically start the theme watcher service
+    # path: /home/discourse/canvas-theme # Custom path in container
+
+# 7. Site Settings
+# Automatically set Discourse site settings after the container is ready.
+# Values can be strings, numbers, or booleans.
+settings:
+  title: "My Provisoned Discourse"
+  site_description: "Created via dv template"
+  enable_experimental_features: true
+  max_topic_title_length: 255
+
+# 8. Post-Creation Commands
+# Arbitrary bash commands to run inside the container during provisioning.
+on_create:
+  - "echo 'Provisioning in progress...'"
+  - "sudo apt-get update && sudo apt-get install -y htop"
+
+# 9. MCP (Model Context Protocol) Servers
+# Register MCP servers for use with AI agents inside the container.
+mcp:
+  # Stock MCP servers: "playwright", "discourse", "chrome-devtools"
+  - name: "playwright"
+  - name: "discourse"
+  # Custom MCP server registration
+  - name: "my-custom-tool"
+    command: "/usr/local/bin/my-mcp-server"
+    args: ["--option", "value"]

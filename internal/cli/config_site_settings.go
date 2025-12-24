@@ -88,17 +88,6 @@ func runSiteSettings(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no container selected; run 'dv start' or pass --container")
 	}
 
-	// Check container state
-	if !docker.Exists(containerName) {
-		return fmt.Errorf("container '%s' does not exist; run 'dv start' first", containerName)
-	}
-	if !docker.Running(containerName) {
-		fmt.Fprintf(cmd.OutOrStdout(), "Starting container '%s'...\n", containerName)
-		if err := docker.Start(containerName); err != nil {
-			return err
-		}
-	}
-
 	// Read and parse YAML file
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -108,6 +97,21 @@ func runSiteSettings(cmd *cobra.Command, args []string) error {
 	var settings map[string]interface{}
 	if err := yaml.Unmarshal(data, &settings); err != nil {
 		return fmt.Errorf("parse YAML: %w", err)
+	}
+
+	return ApplySiteSettings(cmd, cfg, containerName, settings, dryRun, filename)
+}
+
+func ApplySiteSettings(cmd *cobra.Command, cfg config.Config, containerName string, settings map[string]interface{}, dryRun bool, filename string) error {
+	// Check container state
+	if !docker.Exists(containerName) {
+		return fmt.Errorf("container '%s' does not exist; run 'dv start' first", containerName)
+	}
+	if !docker.Running(containerName) {
+		fmt.Fprintf(cmd.OutOrStdout(), "Starting container '%s'...\n", containerName)
+		if err := docker.Start(containerName); err != nil {
+			return err
+		}
 	}
 
 	if len(settings) == 0 {

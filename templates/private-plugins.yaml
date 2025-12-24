@@ -1,0 +1,23 @@
+# Private Plugins Template (via SSH Forwarding)
+# Usage: ./dv new private-dev --template templates/private-plugins.yaml
+#
+# IMPORTANT: This requires an SSH agent running on your host:
+#   eval $(ssh-agent)
+#   ssh-add ~/.ssh/id_ed25519
+
+# Enable host SSH agent forwarding to allow cloning private repos
+git:
+  ssh_forward: true
+
+# Discourse core (optional: track main)
+discourse:
+  branch: main
+
+# Plugins to clone via SSH
+plugins:
+  # Add your private plugins here:
+  # - repo: git@github.com:your-org/private-plugin.git
+
+# Discourse site settings
+settings:
+  shared_edits_enabled: true

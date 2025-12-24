@@ -1,0 +1,15 @@
+# Shared Edits (YJS) Template
+# Usage: ./dv new yjs-edits --template templates/shared-edits-yjs.yaml
+
+# Discourse core (optional: track main)
+discourse:
+  branch: main
+
+# Plugins to clone
+plugins:
+  - repo: https://github.com/discourse/discourse-shared-edits.git
+    branch: yjs
+
+# Discourse site settings applied via API
+settings:
+  shared_edits_enabled: true

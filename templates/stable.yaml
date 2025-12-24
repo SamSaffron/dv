@@ -1,0 +1,5 @@
+# Stable Discourse Template
+# Usage: ./dv new stable --template templates/stable.yaml
+
+discourse:
+  branch: stable

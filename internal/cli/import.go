@@ -43,7 +43,7 @@ var importCmd = &cobra.Command{
 		}
 
 		// Ensure the container is running for the selected image
-		if err := ensureContainerRunning(cmd, cfg, name, false); err != nil {
+		if err := ensureContainerRunning(cmd, cfg, name, false, ""); err != nil {
 			return err
 		}
 

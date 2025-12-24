@@ -172,7 +172,7 @@ func containerImage(name string) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
-func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, reset bool) error {
+func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, reset bool, sshAuthSock string) error {
 	// Fallback: if container has a recorded image, use that; else use selected image
 	imgName := cfg.ContainerImages[name]
 	_, imgCfg, err := resolveImage(cfg, imgName)
@@ -181,10 +181,10 @@ func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, 
 	}
 	workdir := imgCfg.Workdir
 	imageTag := imgCfg.Tag
-	return ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, reset)
+	return ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, reset, sshAuthSock)
 }
 
-func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, name string, workdir string, imageTag string, imgName string, reset bool) error {
+func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, name string, workdir string, imageTag string, imgName string, reset bool, sshAuthSock string) error {
 	if reset && docker.Exists(name) {
 		_ = docker.Stop(name)
 		_ = docker.Remove(name)
@@ -220,7 +220,7 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 		if proxyHost != "" {
 			extraHosts = append(extraHosts, fmt.Sprintf("%s:127.0.0.1", proxyHost))
 		}
-		if err := docker.RunDetached(name, workdir, imageTag, chosenPort, cfg.ContainerPort, labels, envs, extraHosts); err != nil {
+		if err := docker.RunDetached(name, workdir, imageTag, chosenPort, cfg.ContainerPort, labels, envs, extraHosts, sshAuthSock); err != nil {
 			return err
 		}
 		if proxyHost != "" {

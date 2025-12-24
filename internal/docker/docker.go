@@ -293,7 +293,7 @@ func ContainerIP(name string) (string, error) {
 	return ip, nil
 }
 
-func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string, envs map[string]string, extraHosts []string) error {
+func RunDetached(name, workdir, image string, hostPort, containerPort int, labels map[string]string, envs map[string]string, extraHosts []string, sshAuthSock string) error {
 	args := []string{"run", "-d",
 		"--name", name,
 		"-w", workdir,
@@ -301,6 +301,10 @@ func RunDetached(name, workdir, image string, hostPort, containerPort int, label
 	}
 	if isTruthyEnv("DV_VERBOSE") {
 		fmt.Fprintf(os.Stderr, "Running: docker %s\n", strings.Join(args, " "))
+	}
+	if sshAuthSock != "" {
+		args = append(args, "-v", fmt.Sprintf("%s:/tmp/ssh-agent.sock", sshAuthSock))
+		args = append(args, "-e", "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
 	}
 	// Apply extra hosts
 	for _, h := range extraHosts {

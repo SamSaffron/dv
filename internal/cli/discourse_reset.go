@@ -35,6 +35,8 @@ func buildDatabaseResetCommands() []string {
 		"sudo -n true 2>/dev/null || true",
 		"sudo /usr/bin/sv force-stop unicorn || sudo sv force-stop unicorn || true",
 		"sudo /usr/bin/sv force-stop ember-cli || sudo sv force-stop ember-cli || true",
+		"echo 'Waiting for PostgreSQL to be ready...'",
+		"timeout 30 bash -c 'until pg_isready > /dev/null 2>&1; do sleep 1; done' || (echo 'PostgreSQL did not become ready'; exit 1)",
 		"echo 'Resetting and migrating databases (development and test)...'",
 		"MIG_LOG_DEV=/tmp/dv-migrate-dev-$(date +%s).log",
 		"MIG_LOG_TEST=/tmp/dv-migrate-test-$(date +%s).log",

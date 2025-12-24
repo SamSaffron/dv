@@ -1,0 +1,13 @@
+# Theme Development Template
+# Usage: ./dv new theme-dev --template templates/theme-dev.yaml
+
+# Themes to clone and watch
+themes:
+  - repo: https://github.com/discourse/graceful-theme.git
+    name: Graceful
+    auto_watch: true
+
+# Site settings
+settings:
+  title: "Theme Dev Sandbox"
+  default_dark_mode_color_scheme_id: "Dark"

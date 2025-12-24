@@ -200,6 +200,27 @@ dv select NAME
 dv rename OLD NEW
 ```
 
+### Templates
+Provision containers with pre-defined configurations using YAML templates. This is useful for setting up specific environments, installing plugins/themes, or applying site settings automatically.
+
+```bash
+# Create a new agent from a local template
+dv new my-feature --template ./templates/stable.yaml
+
+# Create a new agent from a URL
+dv new my-feature --template https://raw.githubusercontent.com/discourse/dv/main/templates/full.yaml
+```
+
+Templates support:
+- **Discourse Configuration**: Specify branches, PRs, or custom repos.
+- **Plugins & Themes**: Automatically clone plugins and install/watch themes.
+- **Site Settings**: Set Discourse settings (title, theme, experimental features) on boot.
+- **Copy Rules**: Sync host files (like `.gitconfig` or API keys) into the container.
+- **Provisioning**: Run arbitrary bash commands via `on_create`.
+- **MCP Servers**: Register Model Context Protocol servers for AI agents.
+
+See [templates/full.yaml](./templates/full.yaml) for a complete example of all available features.
+
 ### dv extract
 Copy modified files from the running container’s `/var/www/discourse` into a local clone and create a new branch at the container’s HEAD.
 
