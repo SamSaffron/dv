@@ -14,6 +14,7 @@ git:
   # Enable SSH agent forwarding so the container can access your private repos.
   # Requires SSH_AUTH_SOCK to be set on your host.
   ssh_forward: true
+  # allows cloning of repos at: git@github.com:your-org/private-plugin.git
 
 # 3. Environment Variables
 # These will be set inside the container for all future commands.
