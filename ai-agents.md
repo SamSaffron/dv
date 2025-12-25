@@ -13,19 +13,25 @@ This guide documents the repository purpose, key files, and operational guidelin
   1) `DV_DOCKERFILE` env variable path
   2) `${XDG_CONFIG_HOME}/dv/Dockerfile.local`
   3) Embedded default at `${XDG_CONFIG_HOME}/dv/Dockerfile` with tracked SHA
-- `cmd/dv/`: CLI entrypoint
+- `main.go`: CLI entrypoint
 - `internal/cli/`: Subcommand implementations
   - `build.go`: `dv build` builds Docker image
   - `start.go`: `dv start` creates or starts containers (no shell)
   - `enter.go`: `dv enter` opens an interactive shell inside the container
   - `run.go`: `dv run` executes commands inside the container without opening a shell
+  - `copy.go`: `dv copy` (alias `cp`) copies files between host and container
   - `stop.go`: `dv stop` stops containers
-- `remove.go`: `dv remove` removes containers/images
-  - `agent.go`: implements top-level `list`, `new`, `select`, `rename` agent commands
+  - `restart.go`: `dv restart` / `dv restart discourse` restarts containers or services
+  - `remove.go`: `dv remove` removes containers/images
+  - `list.go`, `new.go`, `select.go`, `rename.go`: top-level agent management
   - `extract.go`: `dv extract` copies container changes to local clone
+  - `reset.go`: `dv reset` resets Discourse databases
+  - `mail.go`: `dv mail` runs MailHog with a local tunnel
+  - `expose.go`: `dv expose` proxies the container to LAN
+  - `tui.go`: `dv tui` opens the management TUI
   - `configcmd.go`: `dv config` manages persisted settings
-  - `data.go`: Shows XDG data directory path
-- `completion.go`: `dv config completion` manages shell completions
+  - `data.go`: `dv data` shows XDG data directory path
+  - `completion.go`: `dv config completion` manages shell completions
 - `internal/config/`: JSON configuration management
 - `internal/docker/`: Docker CLI wrappers
 - `internal/xdg/`: XDG path helpers
@@ -58,13 +64,15 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `dv image list|show|select|add|set|rename|remove` — Manage image definitions, workdirs, ports, and Dockerfile sources.
 - `dv start [--reset]` — Create/start the selected container (auto-picks host ports).
 - `dv stop`, `dv restart`, `dv restart discourse` — Stop containers, restart them fully, or restart just runit services.
+- `dv reset` — Stop Discourse services, reset databases, run migrations and seeds, and restart services.
 - `dv remove [NAME] [--image]` — Delete containers (optionally the backing image too).
 - `dv expose [--port]` — Proxy the container onto every LAN interface for device testing; Ctrl+C to stop.
+- `dv mail [--port PORT] [--host-port HOST_PORT]` — Start MailHog in the container and tunnel it to localhost.
 - `dv tui` — TUI for selecting agents, running commands, and inspecting status.
 
 ### Agent Containers (per-image instances)
 - `dv list` — Show containers tied to the selected image (marks the active one).
-- `dv new [NAME]` — Create a new container and select it.
+- `dv new [NAME] [--template T]` — Create a new container (optionally from a template) and select it.
 - `dv select NAME` — Switch the active container.
 - `dv rename OLD NEW` — Rename a container (updates config metadata).
 - `dv data` — Print `${XDG_DATA_HOME}/dv` so scripts can locate extracts.
@@ -74,6 +82,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `dv enter` — Interactive login shell (copyFiles synced beforehand).
 - `dv run-agent/ra` — Run supported AI tooling with prompt/arg passthrough.
 - `dv config workdir [PATH|--reset]` — Override (or clear) the selected container’s workdir (use `--container` to target another agent).
+- `dv copy/cp SOURCE DEST` — Copy files between host and container (supports `@:path` for selected agent).
 
 ### Code Sync & Git Integration
 - `dv extract [--sync|--debug|--chdir|--echo-cd]` — Copy the active workspace into `${XDG_DATA_HOME}/dv/discourse_src` (default workdir) or `${XDG_DATA_HOME}/dv/<workdir-slug>_src` for custom workdirs, optionally keep it bidirectionally synced or emit a `cd` command.
@@ -85,6 +94,9 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `dv config show|get|set KEY VALUE` — Manage JSON config (`selectedAgent`, env passthrough, copyFiles, etc.).
 - `dv config workdir [PATH|--reset]` — Set a per-container entrypoint directory for interactive commands (pass `--container` to pick a different agent).
 - `dv config theme [REPO]` — Scaffold or clone a theme under `/home/discourse`, prompt for theme vs component, install `discourse_theme`, write an `AGENTS.md` brief, configure a `theme-watch-<slug>` runit service (backed by a generated admin-bound API key), and point the workdir at the new directory.
+- `dv config ai` — Launch TUI to configure Discourse AI LLM providers and models.
+- `dv config ai-tool [NAME]` — Scaffold a new AI tool workspace with test and sync helpers.
+- `dv config site_settings FILENAME` — Apply site settings from a YAML file (supports 1Password `op://` refs).
 - `dv config completion <shell>` — Install shell completions.
 - `dv config ccr` — Bootstrap Claude Code Router presets via OpenRouter/OpenAI rankings.
 - `dv config mcp NAME` — Configure Playwright/Discourse MCP servers inside the container (writes TOML, sets envs).

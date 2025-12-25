@@ -107,6 +107,22 @@ Notes:
 - BuildKit/buildx is enabled by default (`docker buildx build --load`). The CLI automatically falls back to legacy `docker build` if buildx is unavailable.
 - Opt-out controls: `--classic-build` forces legacy `docker build`, and `--builder NAME` targets a specific buildx builder (remote builders, Docker Build Cloud, etc.).
 
+### dv pull
+Pull a published image/tag instead of building locally.
+
+```bash
+dv pull [IMAGE_NAME]
+```
+
+### dv image
+Manage image definitions, workdirs, ports, and Dockerfile sources.
+
+```bash
+dv image list
+dv image select NAME
+dv image show
+```
+
 ### dv start
 Create or start the container for the selected image (no shell).
 
@@ -118,8 +134,34 @@ Notes:
 - Maps host `4201` → container `4200` by default (Ember CLI dev server). Override with flags.
 - Performs a pre-flight check and picks the next free port if needed.
 
+### dv stop
+Stop the selected or specified container.
+
+```bash
+dv stop [--name NAME]
+
+# Restart the container
+dv restart [--name NAME]
+
+# Restart only Discourse services (Unicorn/Sidekiq)
+dv restart discourse [--name NAME]
+```
+
+### dv reset
+Reset the development environment's databases.
+
+```bash
+dv reset [--name NAME]
+```
+
+Notes:
+- Stops Discourse services.
+- Resets the development and test databases.
+- Runs migrations and seeds test data.
+- Restarts services.
+
 ### dv enter
-Attach to the running container as user `discourse` in `/var/www/discourse` and open an interactive shell.
+Attach to the running container as user `discourse` in the workdir and open an interactive shell.
 
 ```bash
 dv enter [--name NAME]
@@ -164,6 +206,32 @@ Notes:
 - You can pass a regular file path as the first argument after the agent (e.g. `dv ra codex ./plan.md`). The file will be read on the host and its contents used as the prompt. If the argument is not a file, the existing prompt behavior is used.
 - Filename/path completion is supported when you start typing a path (e.g. `./`, `../`, `/`, or include a path separator).
 - Agent invocation is rule-based (no runtime discovery). Use `--` to pass raw args unchanged (e.g., `dv ra codex -- --help`).
+
+### dv mail
+Run MailHog and tunnel it to localhost.
+
+```bash
+dv mail [--port 8025] [--host-port 8025]
+```
+
+Allows you to access MailHog from your browser (e.g., http://localhost:8025) to inspect emails sent by Discourse. Press Ctrl+C to stop the process and the tunnel.
+
+### dv tui
+Launch an interactive TUI to manage containers, images, and run commands.
+
+```bash
+dv tui
+```
+
+### dv import
+Push local commits or uncommitted work from the host repository into the running container.
+
+```bash
+dv import [--base main]
+```
+
+### dv update agents
+Refresh the preinstalled AI agents inside the container (Codex, Gemini, Crush, Claude, Aider, Cursor, OpenCode).
 
 ### dv update agents
 Refresh the preinstalled AI agents inside the container (Codex, Gemini, Crush, Claude, Aider, Cursor, OpenCode).
@@ -334,11 +402,23 @@ dv config set KEY VALUE
 dv config show
 ```
 
+#### AI Configuration (LLMs)
+Use `dv config ai` to launch a TUI for configuring Discourse AI LLM providers (OpenAI, Anthropic, Bedrock, etc.) and models. It automatically detects API keys from your host environment variables.
+
+#### AI Tool Workspace
+Use `dv config ai-tool [NAME]` to scaffold a directory under `/home/discourse/ai-tools` for developing custom Discourse AI tools. It includes `tool.yml` (metadata), `script.js` (logic), and `bin/test` / `bin/sync` helpers.
+
 #### Theme bootstrap
 Use `dv config theme [REPO]` to prepare a theme workspace inside the running container. Running it with no arguments prompts for a name **and** whether you’re building a full theme or component, installs the `discourse_theme` gem, scaffolds a minimal theme under `/home/discourse/<name>`, writes an `AGENTS.md` brief for AI tools, and updates the workdir override so `dv enter` drops you there. Supplying a git URL or `owner/repo` slug clones the existing theme instead of generating a skeleton, while still installing the gem, writing `AGENTS.md`, and configuring the watcher. Each workspace also receives a `theme-watch-<slug>` runit service that runs `discourse_theme watch` with an API key that’s automatically bound to the first admin user; restart it anytime with `sv restart theme-watch-<slug>` inside the container. Pass `--theme-name` (and optionally `--kind theme|component`) to skip the interactive prompts, and `--verbose` if you want to see every helper command that runs (handy when debugging API key or watcher issues).
 
+#### Site Settings
+Use `dv config site_settings FILENAME.yaml` to apply Discourse site settings from a YAML file. Supports 1Password integration via `op://` references for sensitive values.
+
 #### Local proxy (NAME.localhost)
 Run `dv config local-proxy` to build and start a small reverse proxy container (`dv-local-proxy` by default) that maps each new agent to `NAME.localhost` instead of host ports like `localhost:4201`. By default, the proxy listens on localhost only (port 80 for HTTP, 2080 for admin API) for security. Use `--public` to bind to all network interfaces. Use `--https` to enable HTTPS on port 443 via a local mkcert certificate (HTTP will redirect to HTTPS). The proxy registers containers as you create/start them and injects hostname env vars so assets resolve correctly. Stop or remove the proxy container to go back to host-port URLs; only containers created while the proxy is running adopt the hostname.
+
+#### Claude Code Router (CCR)
+Use `dv config ccr` to bootstrap Claude Code Router presets via OpenRouter/OpenAI rankings.
 
 #### Copying host files before enter/run-agent
 Use `copyRules` in your config to copy host files into the container. Each rule sets a host path (supports `~`, env vars, and globs) and a container destination, plus optional `agents` to only copy when that agent is run via `dv run-agent`. Unscoped rules run for `dv enter`/`dv run`; agent-scoped rules skip those commands.
