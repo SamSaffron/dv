@@ -239,7 +239,6 @@ func expandHostSources(p string) []string {
 
 // shellQuote is now in shared.go
 
-
 func ruleMatchesAgent(rule config.CopyRule, agent string) bool {
 	if len(rule.Agents) == 0 {
 		return true

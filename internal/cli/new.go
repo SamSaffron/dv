@@ -20,7 +20,7 @@ var newCmd = &cobra.Command{
 	Use:   "new [NAME]",
 	Short: "Create a new agent for the selected image and select it",
 	Args:  cobra.RangeArgs(0, 1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (err error) {
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
 			return err
@@ -34,11 +34,10 @@ var newCmd = &cobra.Command{
 		var tpl *templateConfig
 		if templatePath != "" {
 			var data []byte
-			var err error
 			if strings.HasPrefix(templatePath, "http://") || strings.HasPrefix(templatePath, "https://") {
-				resp, err := http.Get(templatePath)
-				if err != nil {
-					return fmt.Errorf("fetch template URL: %w", err)
+				resp, fetchErr := http.Get(templatePath)
+				if fetchErr != nil {
+					return fmt.Errorf("fetch template URL: %w", fetchErr)
 				}
 				defer resp.Body.Close()
 				if resp.StatusCode != http.StatusOK {
@@ -55,7 +54,7 @@ var newCmd = &cobra.Command{
 				}
 			}
 			tpl = &templateConfig{}
-			if err := yaml.Unmarshal(data, tpl); err != nil {
+			if err = yaml.Unmarshal(data, tpl); err != nil {
 				return fmt.Errorf("parse template YAML: %w", err)
 			}
 		}
@@ -71,13 +70,29 @@ var newCmd = &cobra.Command{
 		if docker.Exists(name) {
 			return fmt.Errorf("an agent named '%s' already exists", name)
 		}
+
+		// Cleanup on failure
+		keepOnFailure, _ := cmd.Flags().GetBool("keep-on-failure")
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		containerCreated := false
+		defer func() {
+			if err != nil && containerCreated && !keepOnFailure {
+				fmt.Fprintf(cmd.ErrOrStderr(), "\nProvisioning failed: %v\n", err)
+				fmt.Fprintf(cmd.ErrOrStderr(), "Cleaning up container '%s' (use --keep-on-failure to bypass)...\n", name)
+				_ = docker.Stop(name)
+				_ = docker.Remove(name)
+			}
+		}()
+
 		cfg.SelectedAgent = name
 
-		if isTruthyEnv("DV_VERBOSE") {
+		if verbose || isTruthyEnv("DV_VERBOSE") {
 			fmt.Fprintf(cmd.OutOrStdout(), "Resolving image for agent '%s' (image override: '%s')...\n", name, imageOverride)
 		}
 		// Determine which image to use
-		imgName, imgCfg, err := resolveImage(cfg, imageOverride)
+		var imgName string
+		var imgCfg config.ImageConfig
+		imgName, imgCfg, err = resolveImage(cfg, imageOverride)
 		if err != nil {
 			return err
 		}
@@ -101,21 +116,23 @@ var newCmd = &cobra.Command{
 			}
 		}
 
-		if isTruthyEnv("DV_VERBOSE") {
+		if verbose || isTruthyEnv("DV_VERBOSE") {
 			fmt.Fprintf(cmd.OutOrStdout(), "Saving config with selected agent '%s'...\n", name)
 		}
-		if err := config.Save(configDir, cfg); err != nil {
+		if err = config.Save(configDir, cfg); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Creating agent '%s' from image '%s'...\n", name, imageTag)
 		// initialize container by running a no-op command
-		if err := ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, false, sshAuthSock); err != nil {
+		if err = ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, false, sshAuthSock); err != nil {
 			return err
 		}
+		containerCreated = true
+
 		if cfg.ContainerImages == nil {
 			cfg.ContainerImages = map[string]string{}
 		}
-		if isTruthyEnv("DV_VERBOSE") {
+		if verbose || isTruthyEnv("DV_VERBOSE") {
 			fmt.Fprintf(cmd.OutOrStdout(), "Updating container-image mapping for '%s' to '%s'...\n", name, imgName)
 		}
 		cfg.ContainerImages[name] = imgName
@@ -123,7 +140,7 @@ var newCmd = &cobra.Command{
 
 		// Post-creation template execution
 		if tpl != nil {
-			if err := executeTemplate(cmd, cfg, name, workdir, tpl, sshAuthSock); err != nil {
+			if err = executeTemplate(cmd, cfg, name, workdir, tpl, sshAuthSock, verbose); err != nil {
 				return err
 			}
 		}
@@ -194,7 +211,7 @@ echo "Maintenance successful."
 	return docker.ExecInteractive(name, workdir, envList, []string{"bash", "-lc", script})
 }
 
-func executeTemplate(cmd *cobra.Command, cfg config.Config, name, workdir string, tpl *templateConfig, sshAuthSock string) error {
+func executeTemplate(cmd *cobra.Command, cfg config.Config, name, workdir string, tpl *templateConfig, sshAuthSock string, verbose bool) (err error) {
 	// 1. Env variables
 	envList := collectEnvPassthrough(cfg)
 	if len(tpl.Env) > 0 {
@@ -270,11 +287,27 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	// 6. On Create Commands (Provisioning)
 	for i, c := range tpl.OnCreate {
 		fmt.Fprintf(cmd.OutOrStdout(), "Running on_create command: %s...\n", c)
-		// Redirecting to a log file inside the container to avoid noise
-		logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
-		cmdWithLog := fmt.Sprintf("%s > %s 2>&1", c, logFile)
-		if err := docker.ExecInteractive(name, workdir, envList, []string{"bash", "-lc", cmdWithLog}); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "on_create command failed. See log in container at %s\n", logFile)
+		var actualCmd string
+		if verbose || isTruthyEnv("DV_VERBOSE") {
+			actualCmd = c
+		} else {
+			// Redirecting to a log file inside the container to avoid noise.
+			// Wrapping in ( ) ensure that redirection applies to the whole command
+			// and doesn't create a trailing successful command if 'c' ends in a newline.
+			logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
+			actualCmd = fmt.Sprintf("( %s\n) > %s 2>&1", c, logFile)
+		}
+
+		if err = docker.ExecInteractive(name, workdir, envList, []string{"bash", "-lc", actualCmd}); err != nil {
+			if !verbose && !isTruthyEnv("DV_VERBOSE") {
+				logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
+				fmt.Fprintf(cmd.ErrOrStderr(), "on_create command failed. Log content:\n")
+				if logContent, logErr := docker.ExecOutput(name, workdir, []string{"cat", logFile}); logErr == nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), logContent)
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "(Could not read log file: %v)\n", logErr)
+				}
+			}
 			return fmt.Errorf("on_create command failed: %s: %w", c, err)
 		}
 	}
@@ -282,14 +315,14 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	// 7. Start Services and Wait for Health
 	fmt.Fprintf(cmd.OutOrStdout(), "Provisioning complete. Starting Discourse and waiting for it to be ready...\n")
 	startScript := "sudo /usr/bin/sv start unicorn ember-cli || true"
-	if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", startScript}); err != nil {
+	if _, err = docker.ExecOutput(name, workdir, []string{"bash", "-lc", startScript}); err != nil {
 		return fmt.Errorf("failed to start services: %w", err)
 	}
 
-	// Wait for health check (max 60s)
-	healthCmd := "timeout 60 bash -c 'until curl -s -f http://localhost:9292/srv/status > /dev/null 2>&1; do sleep 2; done' || exit 1"
-	if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", healthCmd}); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: Discourse did not become healthy within 60s. Some settings might fail.\n")
+	// Wait for health check (max 120s)
+	healthCmd := "timeout 120 bash -c 'until curl -s -f http://localhost:4200/srv/status > /dev/null 2>&1; do sleep 2; done' || exit 1"
+	if _, err = docker.ExecOutput(name, workdir, []string{"bash", "-lc", healthCmd}); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: Discourse did not become healthy within 120s. Some settings might fail.\n")
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "Discourse is ready.\n")
 	}
@@ -300,7 +333,7 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	// Site Settings
 	if len(tpl.Settings) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Applying site settings...\n")
-		if err := ApplySiteSettings(cmd, cfg, name, tpl.Settings, false, "template"); err != nil {
+		if err = ApplySiteSettings(cmd, cfg, name, tpl.Settings, false, "template"); err != nil {
 			return fmt.Errorf("failed to apply site settings: %w", err)
 		}
 	}
@@ -316,9 +349,9 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 			containerName: name,
 			discourseRoot: workdir,
 			dataDir:       dataDir,
-			verbose:       isTruthyEnv("DV_VERBOSE"),
+			verbose:       verbose || isTruthyEnv("DV_VERBOSE"),
 		}
-		if err := handleThemeClone(cmd, ctx, t.Repo, t.Name); err != nil {
+		if err = handleThemeClone(cmd, ctx, t.Repo, t.Name); err != nil {
 			return fmt.Errorf("failed to install theme %s: %w", t.Repo, err)
 		}
 	}
@@ -336,22 +369,22 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 			mcpCfg.codexArgs = m.Args
 			mcpCfg.geminiCommand = m.Command
 			mcpCfg.geminiArgs = m.Args
-			if err := configureMCP(cmd, name, workdir, envList, mcpCfg); err != nil {
+			if err = configureMCP(cmd, name, workdir, envList, mcpCfg); err != nil {
 				return fmt.Errorf("failed to configure custom MCP %s: %w", m.Name, err)
 			}
 		} else {
 			// Stock MCP (playwright, discourse, chrome-devtools)
 			switch m.Name {
 			case "playwright":
-				if err := configurePlaywrightMCP(cmd, name, workdir, envList); err != nil {
+				if err = configurePlaywrightMCP(cmd, name, workdir, envList); err != nil {
 					return err
 				}
 			case "discourse":
-				if err := configureDiscourseMCP(cmd, name, workdir, envList); err != nil {
+				if err = configureDiscourseMCP(cmd, name, workdir, envList); err != nil {
 					return err
 				}
 			case "chrome-devtools":
-				if err := configureChromeDevToolsMCP(cmd, name, workdir, envList); err != nil {
+				if err = configureChromeDevToolsMCP(cmd, name, workdir, envList); err != nil {
 					return err
 				}
 			default:
@@ -366,4 +399,6 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 func init() {
 	newCmd.Flags().String("image", "", "Image to use (defaults to selected image)")
 	newCmd.Flags().String("template", "", "Path to a template YAML file")
+	newCmd.Flags().Bool("keep-on-failure", false, "Keep the container even if provisioning fails")
+	newCmd.Flags().BoolP("verbose", "v", false, "Print verbose debugging output")
 }

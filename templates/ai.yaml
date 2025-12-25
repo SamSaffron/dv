@@ -1,0 +1,63 @@
+settings:
+  discourse_ai_enabled: true
+  ai_bot_enabled: true
+  ai_helper_enabled: true
+  ai_summarization_enabled: true
+  # Enable bot debugging for easier testing
+  ai_bot_debugging_allowed_groups: "trust_level_0"
+
+on_create:
+  - "echo 'Configuring LLM models...'"
+  - |
+    bin/rails r - <<'RUBY'
+
+    SiteSetting.ai_bot_github_access_token = ENV["GH_TOKEN"] if ENV["GH_TOKEN"].present?
+
+    # Create Claude 4.5 Sonnet (Anthropic)
+    claude = LlmModel.find_or_initialize_by(display_name: "Claude 4.5 Sonnet")
+    claude.update!(
+      provider: "anthropic",
+      name: "claude-4-5-sonnet-20251001",
+      url: "https://api.anthropic.com/v1/messages",
+      api_key: ENV["ANTHROPIC_API_KEY"],
+      tokenizer: "DiscourseAi::Tokenizer::AnthropicTokenizer",
+      vision_enabled: true,
+      max_prompt_tokens: 200_000
+    )
+    puts "Created/Updated Claude 4.5 Sonnet (ID: #{claude.id})"
+
+    # Create Gemini 3 Flash Preview (Google)
+    gemini = LlmModel.find_or_initialize_by(display_name: "Gemini 3 Flash Preview")
+    gemini.update!(
+      provider: "google",
+      name: "gemini-3-flash-preview",
+      url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview",
+      api_key: ENV["GEMINI_API_KEY"],
+      tokenizer: "DiscourseAi::Tokenizer::GeminiTokenizer",
+      vision_enabled: true,
+      max_prompt_tokens: 1_000_000
+    )
+    puts "Created/Updated Gemini 3 Flash Preview (ID: #{gemini.id})"
+
+    # Create GPT 5.2 (OpenAI)
+    gpt5 = LlmModel.find_or_initialize_by(display_name: "GPT 5.2")
+    gpt5.update!(
+      provider: "open_ai",
+      name: "gpt-5.2",
+      url: "https://api.openai.com/v1/chat/completions",
+      api_key: ENV["OPENAI_API_KEY"],
+      tokenizer: "DiscourseAi::Tokenizer::OpenAiTokenizer",
+      vision_enabled: true,
+      max_prompt_tokens: 128_000
+    )
+    puts "Created/Updated GPT 5.2 (ID: #{gpt5.id})"
+
+    # Enable these LLMs for the AI Bot
+    [claude.id, gpt5.id, gemini.id].each do |id|
+      current = SiteSetting.ai_bot_enabled_llms.split("|")
+      SiteSetting.ai_bot_enabled_llms = (current << id.to_s).uniq.join("|")
+    end
+
+    # Set Claude as the default model
+    SiteSetting.ai_default_llm_model = gemini.id
+    RUBY
