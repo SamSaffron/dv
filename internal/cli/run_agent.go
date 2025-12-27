@@ -12,6 +12,7 @@ import (
 
 	"dv/internal/config"
 	"dv/internal/docker"
+	"dv/internal/paste"
 	"dv/internal/xdg"
 )
 
@@ -216,6 +217,18 @@ var runAgentCmd = &cobra.Command{
 
 		// Execute inside container through a login shell to pick up PATH/rc files
 		shellCmd := withUserPaths(shellJoin(argv))
+
+		// Check if paste support is enabled
+		pasteEnabled, _ := cmd.Flags().GetBool("paste")
+		if pasteEnabled {
+			return paste.ExecWithPaste(paste.DockerExecConfig{
+				ContainerName: name,
+				Workdir:       workdir,
+				Envs:          envs,
+				Argv:          []string{"bash", "-lc", shellCmd},
+				User:          "discourse",
+			})
+		}
 		return docker.ExecInteractive(name, workdir, envs, []string{"bash", "-lc", shellCmd})
 	},
 }
@@ -353,7 +366,7 @@ var agentRules = map[string]agentRule{
 	"gemini": {
 		interactive: func() []string { return []string{"gemini"} },
 		withPrompt:  func(p string) []string { return []string{"gemini", "-p", p} },
-		defaults:    []string{"-y"},
+		defaults:    []string{"-y", "--include-directories", "/", "--model", "gemini-3-flash-preview"},
 		env:         []string{"GEMINI_PROMPT_GIT=0"},
 	},
 	"crush": {
@@ -479,4 +492,5 @@ func isHelpArgs(args []string) bool {
 
 func init() {
 	runAgentCmd.Flags().String("name", "", "Container name (defaults to selected or default)")
+	runAgentCmd.Flags().Bool("paste", true, "Image paste support (copies pasted images to container); use --paste=false to disable")
 }
