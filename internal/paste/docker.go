@@ -298,6 +298,30 @@ func (i *Interceptor) Process(data []byte) []byte {
 				continue
 			}
 
+			// Check for Kitty keyboard protocol Ctrl+V Press: ESC [ 1 1 8 ; 5 u
+			if hasPrefix(remaining, "\x1b[118;5u") {
+				data, format, err := ReadClipboard()
+				if err == nil {
+					if format == "text" {
+						processed := i.processFilePaths(data)
+						result = append(result, processed...)
+					} else {
+						containerPath, err := i.handler(data, format)
+						if err == nil {
+							result = append(result, []byte(containerPath)...)
+						}
+					}
+					j += 8 // Skip the entire sequence
+					continue
+				}
+			}
+
+			// Swallow Kitty keyboard protocol Ctrl+V Release: ESC [ 1 1 8 ; 5 : 3 u
+			if hasPrefix(remaining, "\x1b[118;5:3u") {
+				j += 10 // Skip and swallow the release sequence
+				continue
+			}
+
 			// Check for Kitty graphics start: ESC _ G
 			if hasPrefix(remaining, "\x1b_G") {
 				i.inGraphics = 1
@@ -318,6 +342,25 @@ func (i *Interceptor) Process(data []byte) []byte {
 			if couldBePartialSequence(remaining) {
 				i.pending = append([]byte{}, remaining...)
 				break // Stop processing, wait for more data
+			}
+		}
+
+		// Handle Ctrl+V (0x16) for magic paste if on Wayland/X11
+		if b == '\x16' && i.handler != nil {
+			data, format, err := ReadClipboard()
+			if err == nil {
+				if format == "text" {
+					// Also process file paths in pasted text
+					processed := i.processFilePaths(data)
+					result = append(result, processed...)
+				} else {
+					// Handle as image
+					containerPath, err := i.handler(data, format)
+					if err == nil {
+						result = append(result, []byte(containerPath)...)
+					}
+				}
+				continue
 			}
 		}
 
@@ -346,6 +389,8 @@ func couldBePartialSequence(data []byte) bool {
 		"\x1b[200~",       // bracketed paste start
 		"\x1b_G",          // Kitty graphics
 		"\x1b]1337;File=", // iTerm2 image
+		"\x1b[118;5u",     // Kitty Ctrl+V
+		"\x1b[118;5:3u",   // Kitty Ctrl+V variation
 	}
 
 	for _, seq := range sequences {

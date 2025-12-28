@@ -7,15 +7,98 @@ package paste
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // ImageHandler is called when an image is detected in pasted content.
 // It receives the image data and returns a path that should be substituted.
 type ImageHandler func(data []byte, format string) (containerPath string, err error)
+
+// ReadClipboard attempts to read the current clipboard content.
+// It returns the data, the format (e.g. "png", "jpeg", or "text"), and an error.
+func ReadClipboard() ([]byte, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var errs []string
+
+	// Try Wayland (wl-paste)
+	if _, err := exec.LookPath("wl-paste"); err == nil {
+		// Try image formats first
+		formats := []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+		for _, f := range formats {
+			cmd := exec.CommandContext(ctx, "wl-paste", "--type", f, "--no-newline")
+			var out bytes.Buffer
+			var errOut bytes.Buffer
+			cmd.Stdout = &out
+			cmd.Stderr = &errOut
+			if err := cmd.Run(); err == nil && out.Len() > 0 {
+				return out.Bytes(), strings.TrimPrefix(f, "image/"), nil
+			} else if errOut.Len() > 0 {
+				errs = append(errs, fmt.Sprintf("wl-paste (%s): %s", f, strings.TrimSpace(errOut.String())))
+			}
+		}
+		// Fallback to text
+		cmd := exec.CommandContext(ctx, "wl-paste", "--type", "text/plain", "--no-newline")
+		var out bytes.Buffer
+		var errOut bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &errOut
+		if err := cmd.Run(); err == nil && out.Len() > 0 {
+			return out.Bytes(), "text", nil
+		}
+		// One last try for any text
+		cmd = exec.CommandContext(ctx, "wl-paste", "--no-newline")
+		out.Reset()
+		errOut.Reset()
+		cmd.Stdout = &out
+		cmd.Stderr = &errOut
+		if err := cmd.Run(); err == nil && out.Len() > 0 {
+			return out.Bytes(), "text", nil
+		} else if errOut.Len() > 0 {
+			errs = append(errs, "wl-paste (text): "+strings.TrimSpace(errOut.String()))
+		}
+	} else {
+		errs = append(errs, "wl-paste not found")
+	}
+
+	// Try X11 (xclip)
+	if _, err := exec.LookPath("xclip"); err == nil {
+		// Try image/png
+		cmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
+		var out bytes.Buffer
+		var errOut bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &errOut
+		if err := cmd.Run(); err == nil && out.Len() > 0 {
+			return out.Bytes(), "png", nil
+		} else if errOut.Len() > 0 {
+			errs = append(errs, "xclip (image/png): "+strings.TrimSpace(errOut.String()))
+		}
+		// Fallback to text
+		cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-o")
+		out.Reset()
+		errOut.Reset()
+		cmd.Stdout = &out
+		cmd.Stderr = &errOut
+		if err := cmd.Run(); err == nil && out.Len() > 0 {
+			return out.Bytes(), "text", nil
+		} else if errOut.Len() > 0 {
+			errs = append(errs, "xclip (text): "+strings.TrimSpace(errOut.String()))
+		}
+	} else {
+		errs = append(errs, "xclip not found")
+	}
+
+	return nil, "", fmt.Errorf("clipboard not available: %s", strings.Join(errs, "; "))
+}
 
 // Common patterns for image detection
 var (
