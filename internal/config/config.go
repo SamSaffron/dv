@@ -244,6 +244,16 @@ func DefaultCopyRules() []CopyRule {
 			Container: "/home/discourse/google_account_id",
 			Agents:    []string{"gemini"},
 		},
+		{
+			Host:      "~/.claude/.credentials.json",
+			Container: "/home/discourse/.claude/.credentials.json",
+			Agents:    []string{"claude"},
+		},
+		{
+			Host:      "~/.claude.json",
+			Container: "/home/discourse/.claude.json",
+			Agents:    []string{"claude"},
+		},
 	}
 }
 
