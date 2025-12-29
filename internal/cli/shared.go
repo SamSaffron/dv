@@ -148,6 +148,31 @@ func completeAgentNames(cmd *cobra.Command, toComplete string) ([]string, cobra.
 	return suggestions, cobra.ShellCompDirectiveNoFileComp
 }
 
+func agentNameSlug(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return ""
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range lower {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || r == '.':
+			builder.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
 func autogenName() string {
 	return fmt.Sprintf("ai_agent_%s", time.Now().Format("20060102-150405"))
 }

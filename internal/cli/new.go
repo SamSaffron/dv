@@ -59,12 +59,30 @@ var newCmd = &cobra.Command{
 			}
 		}
 
+		prFlagStr, _ := cmd.Flags().GetString("pr")
+		branchFlag, _ := cmd.Flags().GetString("branch")
+		var prFlag int
+		if prFlagStr != "" {
+			var prErr error
+			prFlag, prErr = ResolvePR(cmd, cfg, prFlagStr)
+			if prErr != nil {
+				return prErr
+			}
+		}
+
 		imageOverride, _ := cmd.Flags().GetString("image")
 
 		name := ""
 		if len(args) == 1 {
 			name = args[0]
-		} else {
+		} else if prFlag > 0 {
+			targetBranch, err := prHeadBranchName(cfg, prFlag)
+			if err != nil {
+				return err
+			}
+			name = uniqueAgentName(agentNameSlug(targetBranch))
+		}
+		if name == "" {
 			name = autogenName()
 		}
 		if docker.Exists(name) {
@@ -138,8 +156,18 @@ var newCmd = &cobra.Command{
 		cfg.ContainerImages[name] = imgName
 		_ = config.Save(configDir, cfg)
 
-		// Post-creation template execution
+		if tpl == nil && (prFlag > 0 || branchFlag != "") {
+			tpl = &templateConfig{}
+		}
+
 		if tpl != nil {
+			if prFlag > 0 {
+				tpl.Discourse.PR = prFlag
+			}
+			if branchFlag != "" {
+				tpl.Discourse.Branch = branchFlag
+			}
+
 			if err = executeTemplate(cmd, cfg, name, workdir, tpl, sshAuthSock, verbose); err != nil {
 				return err
 			}
@@ -183,6 +211,17 @@ git pull > /tmp/dv-git-pull.log 2>&1
 	checkoutCmds := buildBranchCheckoutCommands(branchName)
 	script := buildDiscourseResetScript(checkoutCmds)
 	return docker.ExecInteractive(name, workdir, envs, []string{"bash", "-lc", script})
+}
+
+func uniqueAgentName(base string) string {
+	if base == "" {
+		return ""
+	}
+	name := base
+	for i := 2; docker.Exists(name); i++ {
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	return name
 }
 
 func runMaintenance(cmd *cobra.Command, name, workdir string, envList []string) error {
@@ -401,4 +440,19 @@ func init() {
 	newCmd.Flags().String("template", "", "Path to a template YAML file")
 	newCmd.Flags().Bool("keep-on-failure", false, "Keep the container even if provisioning fails")
 	newCmd.Flags().BoolP("verbose", "v", false, "Print verbose debugging output")
+	newCmd.Flags().String("pr", "", "PR number or search query to checkout")
+	newCmd.Flags().String("branch", "", "Branch to checkout")
+
+	newCmd.RegisterFlagCompletionFunc("pr", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		configDir, err := xdg.ConfigDir()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		cfg, err := config.LoadOrCreate(configDir)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		owner, repo := ownerRepoFromURL(cfg.DiscourseRepo)
+		return SuggestPRNumbers(owner, repo, toComplete)
+	})
 }
