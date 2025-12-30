@@ -91,6 +91,8 @@ func (p *proxyTable) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
+var hostnameSuffix string
+
 func main() {
 	httpAddr := envOrDefault("PROXY_HTTP_ADDR", ":80")
 	httpsAddr := envOrDefault("PROXY_HTTPS_ADDR", "")
@@ -99,6 +101,7 @@ func main() {
 	tlsKeyFile := envOrDefault("PROXY_TLS_KEY_FILE", "")
 	redirectHTTP := isTruthyEnv("PROXY_REDIRECT_HTTP_TO_HTTPS")
 	externalHTTPSPort := envIntOrDefault("PROXY_EXTERNAL_HTTPS_PORT", 443)
+	hostnameSuffix = envOrDefault("PROXY_HOSTNAME_SUFFIX", "dv.localhost")
 	table := newProxyTable()
 
 	go func() {
@@ -184,7 +187,7 @@ func apiRouter(table *proxyTable) http.Handler {
 			}
 			host := normalizeHost(payload.Host)
 			if host == "" {
-				http.Error(w, "host must end with .dv.localhost", http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf("host must end with .%s", hostnameSuffix), http.StatusBadRequest)
 				return
 			}
 			target, err := parseTarget(payload.Target)
@@ -207,7 +210,7 @@ func apiRouter(table *proxyTable) http.Handler {
 		}
 		host := normalizeHost(strings.TrimPrefix(r.URL.Path, "/api/routes/"))
 		if host == "" {
-			http.Error(w, "host must end with .dv.localhost", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("host must end with .%s", hostnameSuffix), http.StatusBadRequest)
 			return
 		}
 		if !table.delete(host) {
@@ -290,7 +293,11 @@ func normalizeHost(h string) string {
 			h = hostOnly
 		}
 	}
-	if !strings.HasSuffix(h, ".dv.localhost") {
+	suffix := hostnameSuffix
+	if suffix == "" {
+		suffix = "dv.localhost"
+	}
+	if !strings.HasSuffix(h, "."+suffix) {
 		return ""
 	}
 	return h

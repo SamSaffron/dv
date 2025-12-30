@@ -78,7 +78,7 @@ var renameCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "Renamed agent '%s' -> '%s'\n", oldName, newName)
 
 		if proxyHost != "" {
-			newHost := localproxy.HostnameForContainer(newName)
+			newHost := localproxy.HostnameForContainer(newName, cfg.LocalProxy.Hostname)
 			_ = docker.UpdateLabels(newName, map[string]string{
 				localproxy.LabelHost: newHost,
 			})

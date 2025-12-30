@@ -21,7 +21,7 @@ func applyLocalProxyMetadata(cfg config.Config, containerName string, hostPort i
 		return ""
 	}
 
-	host := localproxy.HostnameForContainer(containerName)
+	host := localproxy.HostnameForContainer(containerName, lp.Hostname)
 	labels[localproxy.LabelEnabled] = "true"
 	labels[localproxy.LabelHost] = host
 	labels[localproxy.LabelTargetPort] = strconv.Itoa(hostPort)
@@ -32,6 +32,7 @@ func applyLocalProxyMetadata(cfg config.Config, containerName string, hostPort i
 	}
 
 	envs["DISCOURSE_HOSTNAME"] = host
+	envs["RAILS_DEVELOPMENT_HOSTS"] = host
 	envs["DV_LOCAL_PROXY_HOST"] = host
 	envs["DV_LOCAL_PROXY_HTTP_PORT"] = strconv.Itoa(lp.HTTPPort)
 	if lp.HTTPS {

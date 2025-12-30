@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,6 +26,7 @@ This allows you to access the container from other devices on your local network
 Press Ctrl+C to stop exposing.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		verbose, _ := cmd.Flags().GetBool("verbose")
 		configDir, err := xdg.ConfigDir()
 		if err != nil {
 			return err
@@ -37,25 +37,44 @@ Press Ctrl+C to stop exposing.`,
 		}
 
 		name := currentAgentName(cfg)
+		if verbose {
+			fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Selected container: %s\n", name)
+		}
 		if !docker.Running(name) {
 			return fmt.Errorf("container '%s' is not running; start it with 'dv start'", name)
 		}
+		if verbose {
+			fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Container '%s' is running\n", name)
+		}
 
-		// Get the port to expose
+		// Get the container target (IP and port)
 		portOverride, _ := cmd.Flags().GetInt("port")
-		var port int
+		var targetAddr string
 		if portOverride > 0 {
-			port = portOverride
+			// If port override, assume localhost
+			targetAddr = fmt.Sprintf("localhost:%d", portOverride)
+			if verbose {
+				fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Using port override, target: %s\n", targetAddr)
+			}
 		} else {
-			// Get the container's mapped port
-			var err error
-			port, err = getContainerPort(name)
+			// Get the container's IP and port directly
+			if verbose {
+				fmt.Fprintln(cmd.OutOrStdout(), "[verbose] Querying container target...")
+			}
+			containerIP, containerPort, err := getContainerTarget(name, verbose, cmd.OutOrStdout())
 			if err != nil {
-				return fmt.Errorf("failed to get container port: %w", err)
+				return fmt.Errorf("failed to get container target: %w", err)
+			}
+			targetAddr = fmt.Sprintf("%s:%d", containerIP, containerPort)
+			if verbose {
+				fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Will proxy to %s\n", targetAddr)
 			}
 		}
 
 		// Get all non-localhost network interfaces
+		if verbose {
+			fmt.Fprintln(cmd.OutOrStdout(), "[verbose] Scanning network interfaces...")
+		}
 		ips, err := getNonLocalhostIPs()
 		if err != nil {
 			return err
@@ -63,11 +82,29 @@ Press Ctrl+C to stop exposing.`,
 		if len(ips) == 0 {
 			return fmt.Errorf("no non-localhost network interfaces found")
 		}
+		if verbose {
+			fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Found %d non-localhost IP(s):\n", len(ips))
+			for _, ip := range ips {
+				ifaceName := getInterfaceName(ip)
+				if ifaceName != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "[verbose]   %s (%s)\n", ip, ifaceName)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "[verbose]   %s\n", ip)
+				}
+			}
+		}
 
 		// Find an available port for all interfaces
-		availablePort, err := findAvailablePort(ips, port)
+		if verbose {
+			fmt.Fprintln(cmd.OutOrStdout(), "[verbose] Searching for available port starting from 10000...")
+		}
+		availablePort, err := findAvailablePort(ips, verbose, cmd.OutOrStdout())
 		if err != nil {
 			return fmt.Errorf("failed to find available port: %w", err)
+		}
+		if verbose {
+			fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Found available port: %d\n", availablePort)
+			fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Will proxy %s:%d -> %s\n", ips[0], availablePort, targetAddr)
 		}
 
 		// Start proxies for each IP
@@ -81,7 +118,10 @@ Press Ctrl+C to stop exposing.`,
 			wg.Add(1)
 			go func(ip string) {
 				defer wg.Done()
-				if err := startProxy(ctx, ip, availablePort, port); err != nil {
+				if verbose {
+					fmt.Fprintf(cmd.OutOrStdout(), "[verbose] Starting proxy on %s:%d\n", ip, availablePort)
+				}
+				if err := startProxy(ctx, ip, availablePort, targetAddr, verbose, cmd.OutOrStdout()); err != nil {
 					errChan <- fmt.Errorf("proxy on %s: %w", ip, err)
 				}
 			}(ip)
@@ -124,23 +164,27 @@ Press Ctrl+C to stop exposing.`,
 
 func init() {
 	exposeCmd.Flags().Int("port", 0, "Port to expose (defaults to container's mapped port)")
+	exposeCmd.Flags().Bool("verbose", false, "Show detailed debugging information")
 }
 
-// getContainerPort retrieves the host port that the container is mapped to
-func getContainerPort(name string) (int, error) {
-	out, err := docker.ExecOutput(name, "/", []string{"sh", "-c", "echo $DISCOURSE_PORT"})
+// getContainerTarget returns the container's IP and internal port to connect to
+func getContainerTarget(name string, verbose bool, out io.Writer) (string, int, error) {
+	// Get the container's IP address
+	containerIP, err := docker.ContainerIP(name)
 	if err != nil {
-		return 0, err
+		return "", 0, fmt.Errorf("failed to get container IP: %w", err)
 	}
-	portStr := strings.TrimSpace(out)
-	if portStr == "" {
-		return 0, fmt.Errorf("DISCOURSE_PORT not set in container")
+	if verbose {
+		fmt.Fprintf(out, "[verbose] Container IP: %s\n", containerIP)
 	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid DISCOURSE_PORT value: %s", portStr)
+
+	// Default to port 443 (standard HTTPS port used by Discourse in container)
+	containerPort := 443
+	if verbose {
+		fmt.Fprintf(out, "[verbose] Container port: %d\n", containerPort)
 	}
-	return port, nil
+
+	return containerIP, containerPort, nil
 }
 
 // getNonLocalhostIPs returns all IPv4 addresses that are not localhost
@@ -192,16 +236,19 @@ func getNonLocalhostIPs() ([]string, error) {
 }
 
 // findAvailablePort finds a port that's available on all given IPs
-// If the preferred port is available on all IPs, it returns that port.
-// Otherwise, it tries ports starting from the preferred port + 1.
-func findAvailablePort(ips []string, preferredPort int) (int, error) {
+// Starts from port 10000 to avoid privileged ports and common conflicts.
+func findAvailablePort(ips []string, verbose bool, out io.Writer) (int, error) {
+	const startPort = 10000
 	const maxAttempts = 100
-	for port := preferredPort; port < preferredPort+maxAttempts; port++ {
+	for port := startPort; port < startPort+maxAttempts; port++ {
 		allAvailable := true
 		for _, ip := range ips {
 			addr := fmt.Sprintf("%s:%d", ip, port)
 			listener, err := net.Listen("tcp", addr)
 			if err != nil {
+				if verbose {
+					fmt.Fprintf(out, "[verbose] Port %d unavailable on %s: %v\n", port, ip, err)
+				}
 				allAvailable = false
 				break
 			}
@@ -211,7 +258,7 @@ func findAvailablePort(ips []string, preferredPort int) (int, error) {
 			return port, nil
 		}
 	}
-	return 0, fmt.Errorf("no available port found after %d attempts starting from %d", maxAttempts, preferredPort)
+	return 0, fmt.Errorf("no available port found after %d attempts starting from %d", maxAttempts, startPort)
 }
 
 // getInterfaceName returns a friendly name for the interface with the given IP
@@ -252,14 +299,18 @@ func getInterfaceName(targetIP string) string {
 	return ""
 }
 
-// startProxy starts a TCP proxy from listenIP:listenPort to localhost:targetPort
-func startProxy(ctx context.Context, listenIP string, listenPort int, targetPort int) error {
+// startProxy starts a TCP proxy from listenIP:listenPort to targetAddr
+func startProxy(ctx context.Context, listenIP string, listenPort int, targetAddr string, verbose bool, out io.Writer) error {
 	addr := fmt.Sprintf("%s:%d", listenIP, listenPort)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	defer listener.Close()
+
+	if verbose {
+		fmt.Fprintf(out, "[verbose] Listener started on %s\n", addr)
+	}
 
 	// Channel to signal listener is closed
 	done := make(chan struct{})
@@ -281,21 +332,29 @@ func startProxy(ctx context.Context, listenIP string, listenPort int, targetPort
 			}
 		}
 
-		go handleConnection(ctx, conn, targetPort)
+		if verbose {
+			fmt.Fprintf(out, "[verbose] Accepted connection from %s\n", conn.RemoteAddr())
+		}
+		go handleConnection(ctx, conn, targetAddr, verbose, out)
 	}
 }
 
-// handleConnection proxies a connection to localhost:targetPort
-func handleConnection(ctx context.Context, clientConn net.Conn, targetPort int) {
+// handleConnection proxies a connection to targetAddr
+func handleConnection(ctx context.Context, clientConn net.Conn, targetAddr string, verbose bool, out io.Writer) {
 	defer clientConn.Close()
 
-	// Connect to localhost
-	targetAddr := fmt.Sprintf("localhost:%d", targetPort)
 	serverConn, err := net.Dial("tcp", targetAddr)
 	if err != nil {
+		if verbose {
+			fmt.Fprintf(out, "[verbose] Failed to connect to %s: %v\n", targetAddr, err)
+		}
 		return
 	}
 	defer serverConn.Close()
+
+	if verbose {
+		fmt.Fprintf(out, "[verbose] Proxying %s <-> %s\n", clientConn.RemoteAddr(), targetAddr)
+	}
 
 	// Bidirectional copy
 	done := make(chan struct{})
@@ -314,5 +373,9 @@ func handleConnection(ctx context.Context, clientConn net.Conn, targetPort int) 
 	select {
 	case <-ctx.Done():
 	case <-done:
+	}
+
+	if verbose {
+		fmt.Fprintf(out, "[verbose] Connection closed: %s\n", clientConn.RemoteAddr())
 	}
 }

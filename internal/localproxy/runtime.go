@@ -94,6 +94,7 @@ func EnsureContainer(configDir string, cfg config.LocalProxyConfig, recreate boo
 
 	args = append(args, "-e", "PROXY_HTTP_ADDR=:80")
 	args = append(args, "-e", "PROXY_API_ADDR=:2080")
+	args = append(args, "-e", "PROXY_HOSTNAME_SUFFIX="+cfg.Hostname)
 	if cfg.HTTPS {
 		certPath, keyPath := TLSPaths(configDir)
 		if !fileNonEmpty(certPath) || !fileNonEmpty(keyPath) {

@@ -23,7 +23,9 @@ const (
 
 var hostnameSanitizer = regexp.MustCompile(`[^a-z0-9-]`)
 
-func HostnameForContainer(name string) string {
+// HostnameForContainer returns the full hostname for a container, e.g. "mycontainer.dv.localhost".
+// The hostnameSuffix defaults to "dv.localhost" if empty.
+func HostnameForContainer(name string, hostnameSuffix string) string {
 	base := strings.ToLower(strings.TrimSpace(name))
 	base = strings.ReplaceAll(base, "_", "-")
 	base = hostnameSanitizer.ReplaceAllString(base, "-")
@@ -31,7 +33,10 @@ func HostnameForContainer(name string) string {
 	if base == "" {
 		base = "dv"
 	}
-	return base + ".dv.localhost"
+	if strings.TrimSpace(hostnameSuffix) == "" {
+		hostnameSuffix = "dv.localhost"
+	}
+	return base + "." + hostnameSuffix
 }
 
 func Enabled(cfg config.Config) bool {

@@ -69,6 +69,7 @@ var configLocalProxyCmd = &cobra.Command{
 
 		nameFlag, _ := cmd.Flags().GetString("name")
 		imageFlag, _ := cmd.Flags().GetString("image")
+		hostnameFlag, _ := cmd.Flags().GetString("hostname")
 		httpPortFlag, _ := cmd.Flags().GetInt("http-port")
 		httpsPortFlag, _ := cmd.Flags().GetInt("https-port")
 		apiPortFlag, _ := cmd.Flags().GetInt("api-port")
@@ -76,14 +77,17 @@ var configLocalProxyCmd = &cobra.Command{
 		recreate, _ := cmd.Flags().GetBool("recreate")
 		public, _ := cmd.Flags().GetBool("public")
 		httpsEnabled, _ := cmd.Flags().GetBool("https")
-		httpsChanged := cmd.Flags().Changed("https")
 		publicChanged := cmd.Flags().Changed("public")
+		hostnameChanged := cmd.Flags().Changed("hostname")
 
 		if name := trimFlag(nameFlag); name != "" {
 			lp.ContainerName = name
 		}
 		if img := trimFlag(imageFlag); img != "" {
 			lp.ImageTag = img
+		}
+		if hostnameChanged {
+			lp.Hostname = trimFlag(hostnameFlag)
 		}
 		if httpPortFlag > 0 {
 			lp.HTTPPort = httpPortFlag
@@ -94,9 +98,8 @@ var configLocalProxyCmd = &cobra.Command{
 		if apiPortFlag > 0 {
 			lp.APIPort = apiPortFlag
 		}
-		if httpsChanged {
-			lp.HTTPS = httpsEnabled
-		}
+		// HTTPS is always off by default, must explicitly pass --https to enable
+		lp.HTTPS = httpsEnabled
 		if publicChanged {
 			lp.Public = public
 		}
@@ -112,7 +115,7 @@ var configLocalProxyCmd = &cobra.Command{
 			return fmt.Errorf("https-port and http-port must differ")
 		}
 
-		if lp.HTTPS && httpsChanged && httpsEnabled {
+		if lp.HTTPS {
 			// The proxy image needs the latest embedded assets to support HTTPS.
 			rebuild = true
 		}
@@ -162,7 +165,7 @@ var configLocalProxyCmd = &cobra.Command{
 				fmt.Fprintf(cmd.OutOrStdout(), "Local proxy '%s' is ready on port %d (localhost only); API on %d (localhost only).\n", lp.ContainerName, lp.HTTPPort, lp.APIPort)
 			}
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "New containers will register as NAME.dv.localhost when this proxy is running. Remove the proxy container to stop using it.")
+		fmt.Fprintf(cmd.OutOrStdout(), "New containers will register as NAME.%s when this proxy is running. Remove the proxy container to stop using it.\n", lp.Hostname)
 		return nil
 	},
 }
@@ -170,6 +173,7 @@ var configLocalProxyCmd = &cobra.Command{
 func init() {
 	configLocalProxyCmd.Flags().String("name", "", "Container name to run the proxy as (default dv-local-proxy)")
 	configLocalProxyCmd.Flags().String("image", "", "Image tag to build/use for the proxy (default dv-local-proxy)")
+	configLocalProxyCmd.Flags().String("hostname", "", "Base hostname for containers (default dv.localhost, containers become NAME.hostname)")
 	configLocalProxyCmd.Flags().Int("http-port", 0, "Host port that will listen for NAME.dv.localhost requests (defaults to 80)")
 	configLocalProxyCmd.Flags().Bool("https", false, "Enable HTTPS for NAME.dv.localhost using mkcert and redirect HTTP to HTTPS")
 	configLocalProxyCmd.Flags().Int("https-port", 0, "Host port that will listen for HTTPS NAME.dv.localhost requests (defaults to 443 when --https is enabled)")
@@ -191,5 +195,6 @@ func localProxySettingsChanged(prev config.LocalProxyConfig, next config.LocalPr
 		prev.HTTPS != next.HTTPS ||
 		prev.HTTPSPort != next.HTTPSPort ||
 		prev.APIPort != next.APIPort ||
-		prev.Public != next.Public
+		prev.Public != next.Public ||
+		prev.Hostname != next.Hostname
 }

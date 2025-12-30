@@ -82,6 +82,7 @@ type LocalProxyConfig struct {
 	HTTPSPort     int    `json:"httpsPort,omitempty"`
 	APIPort       int    `json:"apiPort"`
 	Public        bool   `json:"public"`
+	Hostname      string `json:"hostname,omitempty"`
 }
 
 func Default() Config {
@@ -334,6 +335,7 @@ func defaultLocalProxyConfig() LocalProxyConfig {
 		HTTPSPort:     0,
 		APIPort:       2080,
 		Public:        false,
+		Hostname:      "dv.localhost",
 	}
 }
 
@@ -353,6 +355,9 @@ func (c *LocalProxyConfig) ApplyDefaults() {
 	}
 	if c.APIPort == 0 {
 		c.APIPort = defaults.APIPort
+	}
+	if strings.TrimSpace(c.Hostname) == "" {
+		c.Hostname = defaults.Hostname
 	}
 	// Public defaults to false (private binding) and doesn't need migration.
 }
