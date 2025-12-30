@@ -27,6 +27,42 @@ var configLocalProxyCmd = &cobra.Command{
 			return err
 		}
 
+		// Handle --remove flag
+		removeFlag, _ := cmd.Flags().GetBool("remove")
+		if removeFlag {
+			lp := cfg.LocalProxy
+			lp.ApplyDefaults()
+
+			if docker.Exists(lp.ContainerName) {
+				if docker.Running(lp.ContainerName) {
+					fmt.Fprintf(cmd.OutOrStdout(), "Stopping local proxy container '%s'...\n", lp.ContainerName)
+					if err := docker.Stop(lp.ContainerName); err != nil {
+						return fmt.Errorf("failed to stop container: %w", err)
+					}
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Removing local proxy container '%s'...\n", lp.ContainerName)
+				if err := docker.Remove(lp.ContainerName); err != nil {
+					return fmt.Errorf("failed to remove container: %w", err)
+				}
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Local proxy container '%s' does not exist.\n", lp.ContainerName)
+			}
+
+			if docker.ImageExists(lp.ImageTag) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Removing local proxy image '%s'...\n", lp.ImageTag)
+				if err := docker.RemoveImage(lp.ImageTag); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to remove image: %v\n", err)
+				}
+			}
+
+			cfg.LocalProxy.Enabled = false
+			if err := config.Save(configDir, cfg); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Local proxy removed.")
+			return nil
+		}
+
 		prev := cfg.LocalProxy
 		prev.ApplyDefaults()
 		lp := prev
@@ -141,6 +177,7 @@ func init() {
 	configLocalProxyCmd.Flags().Bool("rebuild", false, "Force rebuilding the proxy image even if it exists")
 	configLocalProxyCmd.Flags().Bool("recreate", false, "Remove any existing proxy container before starting")
 	configLocalProxyCmd.Flags().Bool("public", false, "Listen on all network interfaces (default: private/localhost only)")
+	configLocalProxyCmd.Flags().Bool("remove", false, "Stop and remove the local proxy container and image")
 	configCmd.AddCommand(configLocalProxyCmd)
 }
 
