@@ -12,7 +12,7 @@ func buildGitCleanupCommands() []string {
 		"git reset --hard",
 		"git clean -fd",
 		"echo 'Ensuring full history is available (unshallow if needed)...'",
-		"if [ -f .git/shallow ]; then git fetch origin --tags --prune --unshallow; else git fetch origin --tags --prune; fi",
+		"if [ -f .git/shallow ]; then git fetch origin --tags --prune --force --unshallow; else git fetch origin --tags --prune --force; fi",
 	}
 }
 
