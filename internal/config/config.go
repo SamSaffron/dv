@@ -45,12 +45,19 @@ type Config struct {
 	CopyRules []CopyRule `json:"copyRules,omitempty"`
 }
 
+// CopyFallback specifies an alternative source when the primary host path doesn't exist.
+type CopyFallback struct {
+	Type string `json:"type"` // "command"
+	Exec string `json:"exec"` // shell command whose stdout becomes file content
+}
+
 // CopyRule represents a host->container copy mapping with optional agent scoping.
 type CopyRule struct {
-	Host      string   `json:"host"`
-	Container string   `json:"container"`
-	Agents    []string `json:"agents,omitempty"`
-	MergeKey  string   `json:"mergeKey,omitempty"`
+	Host      string        `json:"host"`
+	Container string        `json:"container"`
+	Agents    []string      `json:"agents,omitempty"`
+	MergeKey  string        `json:"mergeKey,omitempty"`
+	Fallback  *CopyFallback `json:"fallback,omitempty"`
 }
 
 // ImageSource describes how to obtain the Dockerfile for an image.
@@ -249,6 +256,10 @@ func DefaultCopyRules() []CopyRule {
 			Host:      "~/.claude/.credentials.json",
 			Container: "/home/discourse/.claude/.credentials.json",
 			Agents:    []string{"claude"},
+			Fallback: &CopyFallback{
+				Type: "command",
+				Exec: "security find-generic-password -s 'Claude Code-credentials' -a \"$USER\" -w",
+			},
 		},
 		{
 			Host:      "~/.claude.json",

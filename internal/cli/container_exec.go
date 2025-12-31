@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -86,20 +87,29 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 			continue
 		}
 		hostPaths := expandHostSources(rule.Host)
-		if len(hostPaths) == 0 {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Skipping copy (not found): %s -> %s\n", rule.Host, rule.Container)
-			continue
-		}
-		for _, hostPath := range hostPaths {
-			if hostPath == "" {
-				continue
-			}
-			st, err := os.Stat(hostPath)
-			if err != nil || !st.Mode().IsRegular() {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Skipping copy (not found): %s -> %s\n", hostPath, rule.Container)
-				continue
-			}
 
+		// Filter to only existing regular files
+		var validPaths []string
+		for _, hp := range hostPaths {
+			if hp == "" {
+				continue
+			}
+			if st, err := os.Stat(hp); err == nil && st.Mode().IsRegular() {
+				validPaths = append(validPaths, hp)
+			}
+		}
+
+		// If no valid paths and we have a fallback, try it
+		if len(validPaths) == 0 && rule.Fallback != nil && rule.Fallback.Type == "command" {
+			tmpPath, err := runFallbackCommand(rule.Fallback.Exec)
+			if err == nil && tmpPath != "" {
+				validPaths = []string{tmpPath}
+				defer os.Remove(tmpPath)
+			}
+			// Silently skip if fallback also fails
+		}
+
+		for _, hostPath := range validPaths {
 			target := containerPathFor(rule.Container, hostPath)
 			dstDir := filepath.Dir(target)
 			_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
@@ -117,6 +127,30 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 			}
 		}
 	}
+}
+
+// runFallbackCommand executes a shell command and returns a temp file path containing stdout.
+func runFallbackCommand(command string) (string, error) {
+	cmd := exec.Command("sh", "-c", command)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	if len(output) == 0 {
+		return "", fmt.Errorf("fallback command produced no output")
+	}
+
+	tmpFile, err := os.CreateTemp("", "dv-fallback-*")
+	if err != nil {
+		return "", err
+	}
+	if _, err := tmpFile.Write(output); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", err
+	}
+	tmpFile.Close()
+	return tmpFile.Name(), nil
 }
 
 func mergeAndCopyJSON(containerName, hostPath, target, mergeKey string) error {
