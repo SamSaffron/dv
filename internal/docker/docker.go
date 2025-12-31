@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -8,11 +9,56 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
 	"golang.org/x/term"
 )
+
+// getIdentityAgent parses ~/.ssh/config for a global IdentityAgent setting.
+// Returns the expanded path if found, empty string otherwise.
+func getIdentityAgent() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	configPath := filepath.Join(home, ".ssh", "config")
+	f, err := os.Open(configPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	// Look for IdentityAgent before any Host block (global setting)
+	// or in a Host * block
+	scanner := bufio.NewScanner(f)
+	inGlobalOrWildcard := true
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "host ") {
+			// Check if it's "Host *"
+			hostValue := strings.TrimSpace(line[5:])
+			inGlobalOrWildcard = hostValue == "*"
+			continue
+		}
+		if inGlobalOrWildcard && strings.HasPrefix(lower, "identityagent ") {
+			agent := strings.TrimSpace(line[14:])
+			// Remove quotes if present
+			agent = strings.Trim(agent, "\"'")
+			// Expand ~ to home directory
+			if strings.HasPrefix(agent, "~/") {
+				agent = filepath.Join(home, agent[2:])
+			}
+			return agent
+		}
+	}
+	return ""
+}
 
 // BuildOptions controls how docker images are built.
 type BuildOptions struct {
@@ -299,11 +345,40 @@ func RunDetached(name, workdir, image string, hostPort, containerPort int, label
 		"-w", workdir,
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort, containerPort),
 	}
-	if isTruthyEnv("DV_VERBOSE") {
-		fmt.Fprintf(os.Stderr, "Running: docker %s\n", strings.Join(args, " "))
-	}
+	// hostSSHAuthSock tracks what SSH_AUTH_SOCK should be on the host for Docker to forward
+	hostSSHAuthSock := sshAuthSock
 	if sshAuthSock != "" {
-		args = append(args, "-v", fmt.Sprintf("%s:/tmp/ssh-agent.sock", sshAuthSock))
+		var mountPath string
+		var socketSource string
+		if runtime.GOOS == "darwin" {
+			// On macOS, Docker Desktop/OrbStack provide a magic socket that forwards
+			// the host's SSH agent. We always mount this path.
+			mountPath = "/run/host-services/ssh-auth.sock"
+
+			// Check if there's an IdentityAgent configured (e.g., 1Password).
+			// If so, we need to tell Docker to use that socket instead of SSH_AUTH_SOCK.
+			identityAgent := getIdentityAgent()
+			if identityAgent != "" {
+				hostSSHAuthSock = identityAgent
+				socketSource = "IdentityAgent from ~/.ssh/config"
+			} else {
+				socketSource = "SSH_AUTH_SOCK"
+			}
+		} else {
+			// On Linux, mount the host socket directly
+			mountPath = sshAuthSock
+			socketSource = "SSH_AUTH_SOCK"
+		}
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(os.Stderr, "SSH agent: forwarding %s (%s)\n", hostSSHAuthSock, socketSource)
+			// Check if socket exists on host
+			if _, err := os.Stat(hostSSHAuthSock); err != nil {
+				fmt.Fprintf(os.Stderr, "SSH agent: WARNING - socket does not exist: %v\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "SSH agent: socket exists at %s\n", hostSSHAuthSock)
+			}
+		}
+		args = append(args, "-v", mountPath+":/tmp/ssh-agent.sock")
 		args = append(args, "-e", "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
 	}
 	// Apply extra hosts
@@ -325,8 +400,27 @@ func RunDetached(name, workdir, image string, hostPort, containerPort int, label
 		args = append(args, "--label", fmt.Sprintf("%s=%s", k, v))
 	}
 	args = append(args, image, "--sysctl", "kernel.unprivileged_userns_clone=1")
+	if isTruthyEnv("DV_VERBOSE") {
+		fmt.Fprintf(os.Stderr, "Running: docker %s\n", strings.Join(args, " "))
+	}
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	// If we detected a different SSH agent (e.g., 1Password), set SSH_AUTH_SOCK
+	// in the docker command's environment so Docker Desktop/OrbStack forwards it
+	if hostSSHAuthSock != "" && hostSSHAuthSock != sshAuthSock {
+		// Filter out existing SSH_AUTH_SOCK and replace with our value
+		env := os.Environ()
+		filteredEnv := make([]string, 0, len(env))
+		for _, e := range env {
+			if !strings.HasPrefix(e, "SSH_AUTH_SOCK=") {
+				filteredEnv = append(filteredEnv, e)
+			}
+		}
+		cmd.Env = append(filteredEnv, "SSH_AUTH_SOCK="+hostSSHAuthSock)
+		if isTruthyEnv("DV_VERBOSE") {
+			fmt.Fprintf(os.Stderr, "SSH agent: setting SSH_AUTH_SOCK=%s for docker command\n", hostSSHAuthSock)
+		}
+	}
 	return cmd.Run()
 }
 

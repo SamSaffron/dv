@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 
@@ -122,6 +123,16 @@ var newCmd = &cobra.Command{
 			sshAuthSock = os.Getenv("SSH_AUTH_SOCK")
 			if sshAuthSock == "" {
 				fmt.Fprintln(cmd.ErrOrStderr(), "Warning: ssh_forward enabled in template but SSH_AUTH_SOCK is not set on host.")
+			} else {
+				// Test actual SSH connectivity to GitHub (works with IdentityAgent like 1Password)
+				out, err := exec.Command("ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "git@github.com").CombinedOutput()
+				// ssh -T returns exit code 1 even on success ("successfully authenticated")
+				if err != nil && !strings.Contains(string(out), "successfully authenticated") {
+					fmt.Fprintln(cmd.ErrOrStderr(), "Warning: SSH to GitHub failed. Check your SSH key setup.")
+					if verbose || isTruthyEnv("DV_VERBOSE") {
+						fmt.Fprintf(cmd.ErrOrStderr(), "  SSH output: %s\n", strings.TrimSpace(string(out)))
+					}
+				}
 			}
 		}
 
@@ -264,6 +275,11 @@ func executeTemplate(cmd *cobra.Command, cfg config.Config, name, workdir string
 	if tpl.Git.SSHForward && sshAuthSock != "" {
 		envList = append(envList, "SSH_AUTH_SOCK=/tmp/ssh-agent.sock")
 		fmt.Fprintf(cmd.OutOrStdout(), "Setting up SSH agent forwarding...\n")
+		// Change ownership of the SSH socket to discourse user (it's forwarded from
+		// the host with permissions that don't match the container's discourse user)
+		if _, err := docker.ExecAsRoot(name, workdir, []string{"chown", "discourse:discourse", "/tmp/ssh-agent.sock"}); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to chown SSH socket: %v\n", err)
+		}
 		sshSetup := `
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
@@ -302,6 +318,12 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	}
 
 	// 4. Repository Operations (Plugins)
+	if len(tpl.Plugins) > 0 && (verbose || isTruthyEnv("DV_VERBOSE")) {
+		// Test SSH connectivity inside container
+		fmt.Fprintf(cmd.OutOrStdout(), "Testing SSH inside container...\n")
+		testCmd := "echo \"SSH_AUTH_SOCK=$SSH_AUTH_SOCK\"; ls -la $SSH_AUTH_SOCK 2>&1 || echo 'Socket not found'; ssh -T -o BatchMode=yes -o ConnectTimeout=5 git@github.com 2>&1 || true"
+		_ = docker.ExecInteractive(name, workdir, envList, []string{"bash", "-lc", testCmd})
+	}
 	for _, p := range tpl.Plugins {
 		pPath := p.Path
 		if pPath == "" {

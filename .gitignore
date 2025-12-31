@@ -3,3 +3,4 @@ dv
 .gocache/*
 .cursor/mcp.json
 .cache/*
+templates/local/*
