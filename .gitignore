@@ -4,3 +4,4 @@ dv
 .cursor/mcp.json
 .cache/*
 templates/local/*
+.claude/settings.local.json
