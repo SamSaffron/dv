@@ -363,9 +363,9 @@ func shellQuote(s string) string {
 
 // DiscoverBaseURL determines the correct URL to reach a container's Discourse instance
 func DiscoverBaseURL(containerName string, cfg config.Config) (string, error) {
-	// Option 1: Local proxy is enabled - use NAME.localhost
+	// Option 1: Local proxy is enabled - use NAME.hostname
 	if cfg.LocalProxy.Enabled {
-		host := hostnameForContainer(containerName)
+		host := hostnameForContainer(containerName, cfg.LocalProxy.Hostname)
 		port := cfg.LocalProxy.HTTPPort
 		if port == 80 {
 			return fmt.Sprintf("http://%s", host), nil
@@ -381,8 +381,8 @@ func DiscoverBaseURL(containerName string, cfg config.Config) (string, error) {
 	return fmt.Sprintf("http://localhost:%d", port), nil
 }
 
-// hostnameForContainer converts a container name to a valid .localhost hostname
-func hostnameForContainer(name string) string {
+// hostnameForContainer converts a container name to a valid hostname using the configured domain
+func hostnameForContainer(name, hostname string) string {
 	base := strings.ToLower(strings.TrimSpace(name))
 	base = strings.ReplaceAll(base, "_", "-")
 	re := regexp.MustCompile(`[^a-z0-9-]`)
@@ -391,7 +391,10 @@ func hostnameForContainer(name string) string {
 	if base == "" {
 		base = "dv"
 	}
-	return base + ".dv.localhost"
+	if hostname == "" {
+		hostname = "dv.localhost"
+	}
+	return base + "." + hostname
 }
 
 // getContainerHostPort extracts the published host port from a running container
