@@ -121,6 +121,22 @@ func buildBranchCheckoutCommands(branchName string) []string {
 	}
 }
 
+// buildCurrentBranchResetCommands generates commands to reset the current branch
+// to match origin, discarding all local changes.
+func buildCurrentBranchResetCommands() []string {
+	return []string{
+		"branch=$(git rev-parse --abbrev-ref HEAD)",
+		"if [ \"$branch\" = \"HEAD\" ]; then echo 'Error: detached HEAD state'; exit 1; fi",
+		"echo \"Current branch: $branch\"",
+		"echo 'Fetching from origin...'",
+		"git fetch origin --prune",
+		"echo \"Resetting to origin/$branch...\"",
+		"git reset --hard \"origin/$branch\"",
+		"echo 'Cleaning untracked files...'",
+		"git clean -fd",
+	}
+}
+
 // buildDiscourseDatabaseResetScript generates a shell script that performs
 // database reset only (no git operations):
 // - Stops services (unicorn, ember-cli)
