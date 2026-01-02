@@ -19,8 +19,17 @@ import (
 )
 
 var extractCmd = &cobra.Command{
-	Use:   "extract",
+	Use:   "extract [PATH]",
 	Short: "Extract changes from container's code tree into local repo",
+	Long: `Extract changes from the container into a local repository.
+
+Without arguments, extracts the current workdir (usually /var/www/discourse).
+With a PATH argument, extracts any directory in the container:
+  - Absolute paths: dv extract /home/discourse/my-theme
+  - Relative paths: dv extract plugins/my-plugin (relative to workdir)
+
+Use 'dv extract plugin <name>' or 'dv extract theme <name>' for tab completion.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Flags controlling post-extract behavior and output
 		chdir, _ := cmd.Flags().GetBool("chdir")
@@ -65,6 +74,43 @@ var extractCmd = &cobra.Command{
 			return err
 		}
 		work := config.EffectiveWorkdir(cfg, imgCfg, name)
+
+		// If a path argument is provided, extract that specific path
+		if len(args) > 0 {
+			extractPath := strings.TrimSpace(args[0])
+			if extractPath == "" {
+				return fmt.Errorf("path argument cannot be empty")
+			}
+			// Resolve relative paths against the image workdir
+			if !path.IsAbs(extractPath) {
+				extractPath = path.Join(imgCfg.Workdir, extractPath)
+			}
+			// Verify path exists in container
+			existsOut, err := docker.ExecOutput(name, "/", []string{"bash", "-lc", fmt.Sprintf("[ -d %q ] && echo OK || echo MISSING", extractPath)})
+			if err != nil || !strings.Contains(existsOut, "OK") {
+				return fmt.Errorf("path '%s' not found in container", extractPath)
+			}
+			// Derive local repo path from the directory name
+			base := filepath.Base(extractPath)
+			slug := themeDirSlug(base)
+			localRepo := filepath.Join(dataDir, fmt.Sprintf("%s_src", slug))
+			if customDir != "" {
+				localRepo = customDir
+			}
+			display := fmt.Sprintf("path %s", base)
+			return extractWorkspaceRepo(workspaceExtractOptions{
+				cmd:              cmd,
+				containerName:    name,
+				containerWorkdir: extractPath,
+				localRepo:        localRepo,
+				branchName:       base,
+				displayName:      display,
+				chdir:            chdir,
+				echoCd:           echoCd,
+				syncMode:         syncMode,
+				syncDebug:        syncDebug,
+			})
+		}
 
 		customWorkdir := ""
 		if cfg.CustomWorkdirs != nil {

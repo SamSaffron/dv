@@ -2,12 +2,12 @@
 # Usage: ./dv new theme-dev --template templates/theme-dev.yaml
 
 # Themes to clone and watch
+# will be set up in /home/discourse/graceful-theme
+# to sync to local use dv extract --sync theme graceful
 themes:
-  - repo: https://github.com/discourse/graceful-theme.git
+  - repo: https://github.com/discourse/graceful.git
     name: Graceful
     auto_watch: true
 
-# Site settings
 settings:
   title: "Theme Dev Sandbox"
-  default_dark_mode_color_scheme_id: "Dark"
