@@ -345,36 +345,7 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 		return err
 	}
 
-	// 6. On Create Commands (Provisioning)
-	for i, c := range tpl.OnCreate {
-		fmt.Fprintf(cmd.OutOrStdout(), "Running on_create command: %s...\n", c)
-		var actualCmd string
-		if verbose || isTruthyEnv("DV_VERBOSE") {
-			actualCmd = c
-		} else {
-			// Redirecting to a log file inside the container to avoid noise.
-			// The `: >> file;` prefix and `; : >> file` suffix prevent a mysterious
-			// double-execution bug in bash login shells when running single commands
-			// with output redirection via docker exec.
-			logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
-			actualCmd = fmt.Sprintf(": >> %s; %s >> %s 2>&1; : >> %s", logFile, c, logFile, logFile)
-		}
-
-		if err = docker.ExecInteractive(name, workdir, envList, []string{"bash", "-lc", actualCmd}); err != nil {
-			if !verbose && !isTruthyEnv("DV_VERBOSE") {
-				logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
-				fmt.Fprintf(cmd.ErrOrStderr(), "on_create command failed. Log content:\n")
-				if logContent, logErr := docker.ExecOutput(name, workdir, []string{"cat", logFile}); logErr == nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), logContent)
-				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "(Could not read log file: %v)\n", logErr)
-				}
-			}
-			return fmt.Errorf("on_create command failed: %s: %w", c, err)
-		}
-	}
-
-	// 7. Start Services and Wait for Health
+	// 6. Start Services and Wait for Health
 	fmt.Fprintf(cmd.OutOrStdout(), "Provisioning complete. Starting Discourse and waiting for it to be ready...\n")
 	startScript := "sudo /usr/bin/sv start unicorn ember-cli || true"
 	if _, err = docker.ExecOutput(name, workdir, []string{"bash", "-lc", startScript}); err != nil {
@@ -415,6 +386,35 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 		}
 		if err = handleThemeClone(cmd, ctx, t.Repo, t.Name); err != nil {
 			return fmt.Errorf("failed to install theme %s: %w", t.Repo, err)
+		}
+	}
+
+	// On Create Commands (run last so themes/settings are available)
+	for i, c := range tpl.OnCreate {
+		fmt.Fprintf(cmd.OutOrStdout(), "Running on_create command: %s...\n", c)
+		var actualCmd string
+		if verbose || isTruthyEnv("DV_VERBOSE") {
+			actualCmd = c
+		} else {
+			// Redirecting to a log file inside the container to avoid noise.
+			// The `: >> file;` prefix and `; : >> file` suffix prevent a mysterious
+			// double-execution bug in bash login shells when running single commands
+			// with output redirection via docker exec.
+			logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
+			actualCmd = fmt.Sprintf(": >> %s; %s >> %s 2>&1; : >> %s", logFile, c, logFile, logFile)
+		}
+
+		if err = docker.ExecInteractive(name, workdir, envList, []string{"bash", "-lc", actualCmd}); err != nil {
+			if !verbose && !isTruthyEnv("DV_VERBOSE") {
+				logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
+				fmt.Fprintf(cmd.ErrOrStderr(), "on_create command failed. Log content:\n")
+				if logContent, logErr := docker.ExecOutput(name, workdir, []string{"cat", logFile}); logErr == nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), logContent)
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "(Could not read log file: %v)\n", logErr)
+				}
+			}
+			return fmt.Errorf("on_create command failed: %s: %w", c, err)
 		}
 	}
 
