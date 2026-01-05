@@ -353,10 +353,11 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 			actualCmd = c
 		} else {
 			// Redirecting to a log file inside the container to avoid noise.
-			// Wrapping in ( ) ensure that redirection applies to the whole command
-			// and doesn't create a trailing successful command if 'c' ends in a newline.
+			// The `: >> file;` prefix and `; : >> file` suffix prevent a mysterious
+			// double-execution bug in bash login shells when running single commands
+			// with output redirection via docker exec.
 			logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
-			actualCmd = fmt.Sprintf("( %s\n) > %s 2>&1", c, logFile)
+			actualCmd = fmt.Sprintf(": >> %s; %s >> %s 2>&1; : >> %s", logFile, c, logFile, logFile)
 		}
 
 		if err = docker.ExecInteractive(name, workdir, envList, []string{"bash", "-lc", actualCmd}); err != nil {
