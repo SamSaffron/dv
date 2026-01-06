@@ -64,6 +64,11 @@ type statusEntry struct {
 	oldPath  string
 }
 
+type retryEntry struct {
+	source   changeSource
+	attempts int
+}
+
 type extractSync struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -74,9 +79,23 @@ type extractSync struct {
 	errOut        io.Writer
 	debug         bool
 	events        chan watcherEvent
+	retryQueue    map[string]retryEntry
 }
 
 var errSyncSkipped = errors.New("sync skipped")
+var errTransient = errors.New("transient error")
+
+const maxRetryAttempts = 3
+
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return os.IsPermission(err) ||
+		strings.Contains(msg, "Permission denied") ||
+		strings.Contains(msg, "text file busy")
+}
 
 func runExtractSync(cmd *cobra.Command, opts syncOptions) error {
 	ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -90,6 +109,7 @@ func runExtractSync(cmd *cobra.Command, opts syncOptions) error {
 		errOut:        opts.errOut,
 		debug:         opts.debug,
 		events:        make(chan watcherEvent, 256),
+		retryQueue:    make(map[string]retryEntry),
 	}
 	defer cancel()
 
@@ -299,6 +319,15 @@ func (s *extractSync) processEvents() error {
 		default:
 		}
 
+		// Merge retry queue into paths to process
+		for path, entry := range s.retryQueue {
+			if entry.source == sourceHost {
+				hostPaths[path] = struct{}{}
+			} else {
+				containerPaths[path] = struct{}{}
+			}
+		}
+
 		// Collect paths to process
 		hostToProcess := mapKeys(hostPaths)
 		containerToProcess := mapKeys(containerPaths)
@@ -425,19 +454,30 @@ func (s *extractSync) processHostChanges(paths []string) error {
 		case changeModify, changeRename:
 			same, err := s.hashesMatch(change.path)
 			if err != nil {
+				if errors.Is(err, errTransient) {
+					s.queueRetry(change.path, sourceHost)
+					continue
+				}
 				return err
 			}
 			if same {
 				s.debugf("host path %s already synchronized", change.path)
+				delete(s.retryQueue, change.path)
 				continue
 			}
 			if err := s.copyHostToContainer(change.path); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping host → container copy for %s (file vanished)", change.path)
+					delete(s.retryQueue, change.path)
+					continue
+				}
+				if errors.Is(err, errTransient) {
+					s.queueRetry(change.path, sourceHost)
 					continue
 				}
 				return err
 			}
+			delete(s.retryQueue, change.path)
 			fmt.Fprintf(s.logOut, "host → container: updated %s\n", change.path)
 		}
 	}
@@ -486,6 +526,10 @@ func (s *extractSync) processHostChanges(paths []string) error {
 		// Check if it actually differs from container (e.g., after git reset)
 		same, err := s.hashesMatch(rel)
 		if err != nil {
+			if errors.Is(err, errTransient) {
+				s.queueRetry(rel, sourceHost)
+				continue
+			}
 			s.debugf("hash check failed for %s: %v", rel, err)
 			continue
 		}
@@ -493,14 +537,21 @@ func (s *extractSync) processHostChanges(paths []string) error {
 			if err := s.copyHostToContainer(rel); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping host → container copy for %s (file vanished)", rel)
+					delete(s.retryQueue, rel)
+					continue
+				}
+				if errors.Is(err, errTransient) {
+					s.queueRetry(rel, sourceHost)
 					continue
 				}
 				s.debugf("copy failed for %s: %v", rel, err)
 				continue
 			}
+			delete(s.retryQueue, rel)
 			fmt.Fprintf(s.logOut, "host → container: updated %s\n", rel)
 		} else {
 			s.debugf("host path %s already synchronized", rel)
+			delete(s.retryQueue, rel)
 		}
 	}
 
@@ -547,19 +598,30 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 		case changeModify, changeRename:
 			same, err := s.hashesMatch(change.path)
 			if err != nil {
+				if errors.Is(err, errTransient) {
+					s.queueRetry(change.path, sourceContainer)
+					continue
+				}
 				return err
 			}
 			if same {
 				s.debugf("container path %s already synchronized", change.path)
+				delete(s.retryQueue, change.path)
 				continue
 			}
 			if err := s.copyContainerToHost(change.path); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping container → host copy for %s (file vanished)", change.path)
+					delete(s.retryQueue, change.path)
+					continue
+				}
+				if errors.Is(err, errTransient) {
+					s.queueRetry(change.path, sourceContainer)
 					continue
 				}
 				return err
 			}
+			delete(s.retryQueue, change.path)
 			fmt.Fprintf(s.logOut, "container → host: updated %s\n", change.path)
 		}
 	}
@@ -607,6 +669,10 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 		// Check if it actually differs from host (e.g., after git reset)
 		same, err := s.hashesMatch(rel)
 		if err != nil {
+			if errors.Is(err, errTransient) {
+				s.queueRetry(rel, sourceContainer)
+				continue
+			}
 			s.debugf("hash check failed for %s: %v", rel, err)
 			continue
 		}
@@ -614,14 +680,21 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 			if err := s.copyContainerToHost(rel); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping container → host copy for %s (file vanished)", rel)
+					delete(s.retryQueue, rel)
+					continue
+				}
+				if errors.Is(err, errTransient) {
+					s.queueRetry(rel, sourceContainer)
 					continue
 				}
 				s.debugf("copy failed for %s: %v", rel, err)
 				continue
 			}
+			delete(s.retryQueue, rel)
 			fmt.Fprintf(s.logOut, "container → host: updated %s\n", rel)
 		} else {
 			s.debugf("container path %s already synchronized", rel)
+			delete(s.retryQueue, rel)
 		}
 	}
 
@@ -729,6 +802,9 @@ func (s *extractSync) hostHash(rel string) (string, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
 		}
+		if isTransientError(err) {
+			return "", fmt.Errorf("%w: %v", errTransient, err)
+		}
 		return "", err
 	}
 	cmd := exec.Command("git", "-C", s.localRepo, "hash-object", "--", filepath.FromSlash(rel))
@@ -738,7 +814,11 @@ func (s *extractSync) hostHash(rel string) (string, error) {
 		if strings.Contains(msg, "does not exist") {
 			return "", nil
 		}
-		return "", fmt.Errorf("git hash-object (host): %w: %s", err, msg)
+		fullErr := fmt.Errorf("git hash-object (host): %w: %s", err, msg)
+		if isTransientError(fullErr) {
+			return "", fmt.Errorf("%w: %s", errTransient, msg)
+		}
+		return "", fullErr
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -760,7 +840,11 @@ func (s *extractSync) containerHash(rel string) (string, error) {
 		if strings.Contains(msg, "does not exist") || strings.Contains(msg, "No such file") {
 			return "", nil
 		}
-		return "", fmt.Errorf("git hash-object (container): %w: %s", err, msg)
+		fullErr := fmt.Errorf("git hash-object (container): %w: %s", err, msg)
+		if isTransientError(fullErr) {
+			return "", fmt.Errorf("%w: %s", errTransient, msg)
+		}
+		return "", fullErr
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -922,6 +1006,19 @@ func (s *extractSync) debugf(format string, args ...interface{}) {
 		return
 	}
 	fmt.Fprintf(s.logOut, "[debug] "+format+"\n", args...)
+}
+
+func (s *extractSync) queueRetry(path string, source changeSource) {
+	entry := s.retryQueue[path]
+	entry.source = source
+	entry.attempts++
+	if entry.attempts >= maxRetryAttempts {
+		fmt.Fprintf(s.errOut, "warning: giving up on %s after %d attempts\n", path, entry.attempts)
+		delete(s.retryQueue, path)
+		return
+	}
+	fmt.Fprintf(s.errOut, "warning: %s failed, will retry (attempt %d/%d)\n", path, entry.attempts, maxRetryAttempts)
+	s.retryQueue[path] = entry
 }
 
 func (s *extractSync) isGitIgnored(repoDir, relPath string) (bool, error) {
