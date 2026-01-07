@@ -100,7 +100,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `dv config completion <shell>` — Install shell completions.
 - `dv config ccr` — Bootstrap Claude Code Router presets via OpenRouter/OpenAI rankings.
 - `dv config mcp NAME` — Configure Playwright/Discourse MCP servers inside the container (writes TOML, sets envs).
-- `dv config local-proxy` — Build/start a lightweight proxy container (defaults: `dv-local-proxy` on ports 80/2080; add `--https` for 443) so new agents are reachable at `NAME.localhost`; by default binds to localhost only, use `--public` to expose on all network interfaces. The container automatically restarts on boot. Use `--remove` to stop and remove the proxy container and image.
+- `dv config local-proxy` — Build/start a lightweight proxy container (defaults: `dv-local-proxy` on ports 80/2080; add `--https` for 443) so new agents are reachable at `NAME.dv.localhost`; by default binds to localhost only, use `--public` to expose on all network interfaces. The container automatically restarts on boot. Use `--remove` to stop and remove the proxy container and image.
 
 ### Updates & Diagnostics
 - `dv update agents` — Refresh bundled AI tools inside the running container.

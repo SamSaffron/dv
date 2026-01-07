@@ -148,17 +148,27 @@ dv restart discourse [--name NAME]
 ```
 
 ### dv reset
-Reset the development environment's databases.
+Reset the development environment (databases or git state).
 
 ```bash
+# Reset databases (default behavior)
 dv reset [--name NAME]
+dv reset db [--name NAME]
+
+# Reset git state (discard local changes, sync with upstream)
+dv reset git [--name NAME]
 ```
 
-Notes:
+Notes for `dv reset` / `dv reset db`:
 - Stops Discourse services.
 - Resets the development and test databases.
 - Runs migrations and seeds test data.
 - Restarts services.
+
+Notes for `dv reset git`:
+- Discards local code changes in the container.
+- Syncs with the upstream branch.
+- Reinstalls dependencies and runs migrations.
 
 ### dv enter
 Attach to the running container as user `discourse` in the workdir and open an interactive shell.
@@ -233,9 +243,6 @@ dv import [--base main]
 ### dv update agents
 Refresh the preinstalled AI agents inside the container (Codex, Gemini, Crush, Claude, Aider, Cursor, OpenCode).
 
-### dv update agents
-Refresh the preinstalled AI agents inside the container (Codex, Gemini, Crush, Claude, Aider, Cursor, OpenCode).
-
 ```bash
 dv update agents [--name NAME]
 ```
@@ -243,13 +250,6 @@ dv update agents [--name NAME]
 Notes:
 - Starts the container if needed before running updates.
 - Re-runs the official install scripts or package managers to pull the latest versions.
-
-### dv stop
-Stop the selected or specified container.
-
-```bash
-dv stop [--name NAME]
-```
 
 ### dv remove
 Remove the container and optionally the image.
@@ -393,6 +393,32 @@ dv extract plugin discourse-akismet --chdir
 eval "$(dv extract plugin discourse-akismet --echo-cd)"
 ```
 
+### dv extract theme
+Extract changes for a theme from `/home/discourse` inside the container.
+
+```bash
+dv extract theme <name> [--name NAME] [--sync] [--debug] [--chdir] [--echo-cd]
+```
+
+Notes:
+- Requires the container to be running to discover themes.
+- TAB completion suggests theme directories under `/home/discourse` that are git repositories.
+- Destination is `${XDG_DATA_HOME}/dv/<THEME>_src`.
+- `--sync` enables continuous bidirectional synchronization (press Ctrl+C to stop).
+- `--chdir` opens a subshell in the extracted directory on completion. `--echo-cd` prints a `cd <path>` line to stdout (suitable for `eval`).
+
+Examples:
+```bash
+# Extract a theme
+dv extract theme winter-colors
+
+# Start continuous sync for theme development
+dv extract theme winter-colors --sync
+
+# Jump into the extracted repo afterwards
+dv extract theme winter-colors --chdir
+```
+
 ### dv config
 Read/write config stored at `${XDG_CONFIG_HOME}/dv/config.json`.
 
@@ -414,8 +440,8 @@ Use `dv config theme [REPO]` to prepare a theme workspace inside the running con
 #### Site Settings
 Use `dv config site_settings FILENAME.yaml` to apply Discourse site settings from a YAML file. Supports 1Password integration via `op://` references for sensitive values.
 
-#### Local proxy (NAME.localhost)
-Run `dv config local-proxy` to build and start a small reverse proxy container (`dv-local-proxy` by default) that maps each new agent to `NAME.localhost` instead of host ports like `localhost:4201`. By default, the proxy listens on localhost only (port 80 for HTTP, 2080 for admin API) for security. Use `--public` to bind to all network interfaces. Use `--https` to enable HTTPS on port 443 via a local mkcert certificate (HTTP will redirect to HTTPS). The proxy registers containers as you create/start them and injects hostname env vars so assets resolve correctly. Stop or remove the proxy container to go back to host-port URLs; only containers created while the proxy is running adopt the hostname.
+#### Local proxy (NAME.dv.localhost)
+Run `dv config local-proxy` to build and start a small reverse proxy container (`dv-local-proxy` by default) that maps each new agent to `NAME.dv.localhost` instead of host ports like `localhost:4201`. By default, the proxy listens on localhost only (port 80 for HTTP, 2080 for admin API) for security. Use `--public` to bind to all network interfaces. Use `--https` to enable HTTPS on port 443 via a local mkcert certificate (HTTP will redirect to HTTPS). The proxy registers containers as you create/start them and injects hostname env vars so assets resolve correctly. Stop or remove the proxy container to go back to host-port URLs; only containers created while the proxy is running adopt the hostname.
 
 #### Claude Code Router (CCR)
 Use `dv config ccr` to bootstrap Claude Code Router presets via OpenRouter/OpenAI rankings.
@@ -475,6 +501,10 @@ Automatically passed through when set on the host:
 - `DEEPSEEK_API_KEY`
 - `GEMINI_API_KEY`
 - `AMP_API_KEY`
+- `GH_TOKEN`
+- `OPENROUTER_API_KEY`
+- `KILOCODE_API_KEY`
+- `FACTORY_API_KEY`
 
 ### Build acceleration toggles
 
