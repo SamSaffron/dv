@@ -13,6 +13,7 @@ import (
 
 	"dv/internal/config"
 	"dv/internal/docker"
+	"dv/internal/session"
 	"dv/internal/xdg"
 )
 
@@ -28,6 +29,17 @@ func isTruthyEnv(key string) bool {
 }
 
 func currentAgentName(cfg config.Config) string {
+	// 1. Explicit environment override
+	if envAgent := os.Getenv("DV_AGENT"); envAgent != "" {
+		return envAgent
+	}
+
+	// 2. Session-local selection (from $XDG_RUNTIME_DIR)
+	if sessionAgent := session.GetCurrentAgent(); sessionAgent != "" {
+		return sessionAgent
+	}
+
+	// 3. Global config
 	name := cfg.SelectedAgent
 	if name == "" {
 		name = cfg.DefaultContainer

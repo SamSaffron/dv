@@ -73,7 +73,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 ### Agent Containers (per-image instances)
 - `dv list` — Show containers tied to the selected image (marks the active one).
 - `dv new [NAME] [--template T]` — Create a new container (optionally from a template) and select it.
-- `dv select NAME` — Switch the active container.
+- `dv select NAME` — Switch the active container for this terminal session and set as default for new terminals. Each terminal maintains its own selection (stored in `$XDG_RUNTIME_DIR`).
 - `dv rename OLD NEW` — Rename a container (updates config metadata).
 - `dv data` — Print `${XDG_DATA_HOME}/dv` so scripts can locate extracts.
 
@@ -124,6 +124,9 @@ This guide documents the repository purpose, key files, and operational guidelin
 
 ## Environment Variables
 Auto-passed to container when set on host: `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `AMP_API_KEY`, `KILOCODE_API_KEY`, `FACTORY_API_KEY`, `MISTRAL_API_KEY`.
+
+Host-side environment variables:
+- `DV_AGENT`: Override the selected container for the current process (takes priority over session and global config).
 
 Playwright preinstalled with dependencies; no extra setup needed.
 

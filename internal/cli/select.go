@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"dv/internal/config"
+	"dv/internal/session"
 	"dv/internal/xdg"
 )
 
@@ -31,10 +32,19 @@ var selectCmd = &cobra.Command{
 		}
 
 		name := args[0]
+
+		// Save to session-local state (current terminal)
+		if err := session.SetCurrentAgent(name); err != nil {
+			// Non-fatal: fall back to global-only behavior
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not save session state: %v\n", err)
+		}
+
+		// Save to global config (new terminals)
 		cfg.SelectedAgent = name
 		if err := config.Save(configDir, cfg); err != nil {
 			return err
 		}
+
 		fmt.Fprintf(cmd.OutOrStdout(), "Selected agent: %s\n", name)
 		return nil
 	},

@@ -36,7 +36,7 @@ var listCmd = &cobra.Command{
 
 		// Include Ports, Labels, and CreatedAt for discovery, clickable URLs, and ordering
 		out, _ := runShell("docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}\t{{.CreatedAt}}'")
-		selected := cfg.SelectedAgent
+		selected := currentAgentName(cfg)
 		var agents []agentInfo
 
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {

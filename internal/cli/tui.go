@@ -158,7 +158,7 @@ func (m *model) reload(cmd *cobra.Command) {
 	m.cfg = cfg
 	items := m.fetchAgentItems(cfg)
 	m.list.SetItems(items)
-	m.status = fmt.Sprintf("image: %s | selected agent: %s", cfg.SelectedImage, cfg.SelectedAgent)
+	m.status = fmt.Sprintf("image: %s | selected agent: %s", cfg.SelectedImage, currentAgentName(cfg))
 }
 
 func (m *model) fetchAgentItems(cfg config.Config) []list.Item {
