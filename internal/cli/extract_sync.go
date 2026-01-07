@@ -80,6 +80,12 @@ type extractSync struct {
 	debug         bool
 	events        chan watcherEvent
 	retryQueue    map[string]retryEntry
+
+	// Git sync integration
+	gitSyncer      *gitSyncer
+	gitEvents      chan struct{}
+	fileSyncPaused bool
+	fileSyncIdle   chan struct{} // Closed when file sync is idle
 }
 
 var errSyncSkipped = errors.New("sync skipped")
@@ -110,8 +116,13 @@ func runExtractSync(cmd *cobra.Command, opts syncOptions) error {
 		debug:         opts.debug,
 		events:        make(chan watcherEvent, 256),
 		retryQueue:    make(map[string]retryEntry),
+		gitEvents:     make(chan struct{}, 1),
+		fileSyncIdle:  make(chan struct{}),
 	}
 	defer cancel()
+
+	// Initialize git syncer
+	s.gitSyncer = newGitSyncer(ctx, opts.containerName, opts.containerWorkdir, opts.localRepo, opts.logOut, opts.errOut, opts.debug)
 
 	if err := s.ensureInotify(); err != nil {
 		return err
@@ -131,6 +142,8 @@ func (s *extractSync) run() error {
 	g.Go(s.runHostWatcher)
 	g.Go(s.runContainerWatcher)
 	g.Go(s.processEvents)
+	g.Go(s.runGitWatcher)
+	g.Go(s.processGitEvents)
 
 	if err := g.Wait(); err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -376,6 +389,11 @@ func (s *extractSync) processEvents() error {
 	}
 
 	for {
+		// Signal idle state when no pending events and timer not active
+		if !timerActive && len(hostPaths) == 0 && len(containerPaths) == 0 {
+			s.signalFileSyncIdle()
+		}
+
 		select {
 		case <-s.ctx.Done():
 			if timerActive {
@@ -407,6 +425,11 @@ func (s *extractSync) processEvents() error {
 			timerActive = true
 		case <-timer.C:
 			timerActive = false
+			// Skip file sync if paused for git sync
+			if s.fileSyncPaused {
+				s.debugf("file sync paused, skipping flush")
+				continue
+			}
 			if err := flushWithTimeout(flushTimeout); err != nil {
 				return err
 			}
@@ -699,6 +722,133 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 	}
 
 	return nil
+}
+
+// runGitWatcher watches for git state changes on host (.git/HEAD and refs)
+func (s *extractSync) runGitWatcher() error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+	gitDir := filepath.Join(s.localRepo, ".git")
+
+	// Watch HEAD file (changes on checkout, reset)
+	headPath := filepath.Join(gitDir, "HEAD")
+	if err := watcher.Add(headPath); err != nil {
+		s.debugf("could not watch .git/HEAD: %v", err)
+	}
+
+	// Watch refs/heads directory (changes on commit, branch create/delete)
+	refsHeads := filepath.Join(gitDir, "refs", "heads")
+	if err := watcher.Add(refsHeads); err != nil {
+		// refs/heads might not exist yet in a fresh repo
+		s.debugf("could not watch refs/heads: %v", err)
+	}
+
+	// Also watch packed-refs for packed references
+	packedRefs := filepath.Join(gitDir, "packed-refs")
+	_ = watcher.Add(packedRefs) // Ignore error if doesn't exist
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return nil
+		case err := <-watcher.Errors:
+			if err != nil {
+				s.debugf("git watcher error: %v", err)
+			}
+		case event := <-watcher.Events:
+			if event.Op&(fsnotify.Write|fsnotify.Create) == 0 {
+				continue
+			}
+			s.debugf("git state change detected: %s (%s)", event.Name, event.Op)
+			// Signal git sync needed (non-blocking)
+			select {
+			case s.gitEvents <- struct{}{}:
+			default:
+				// Already have a pending sync
+			}
+		}
+	}
+}
+
+// processGitEvents handles git sync events with debouncing
+func (s *extractSync) processGitEvents() error {
+	const gitSyncDelay = 500 * time.Millisecond
+
+	timer := time.NewTimer(gitSyncDelay)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	timerActive := false
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			if timerActive {
+				timer.Stop()
+			}
+			return nil
+		case <-s.gitEvents:
+			if timerActive {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}
+			timer.Reset(gitSyncDelay)
+			timerActive = true
+		case <-timer.C:
+			timerActive = false
+			if err := s.performGitSync(); err != nil {
+				fmt.Fprintf(s.errOut, "git sync error: %v\n", err)
+			}
+		}
+	}
+}
+
+// performGitSync pauses file sync and performs git state synchronization
+func (s *extractSync) performGitSync() error {
+	// Wait for file sync to become idle
+	s.waitForFileSyncIdle()
+
+	// Pause file sync during git operations
+	s.fileSyncPaused = true
+	defer func() { s.fileSyncPaused = false }()
+
+	return s.gitSyncer.syncToContainer()
+}
+
+// waitForFileSyncIdle waits until file sync is idle (no pending events)
+func (s *extractSync) waitForFileSyncIdle() {
+	// The fileSyncIdle channel is closed when processEvents has no pending work
+	// We create a new channel each cycle
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-s.fileSyncIdle:
+			return
+		case <-time.After(50 * time.Millisecond):
+			// Check again
+		}
+	}
+}
+
+// signalFileSyncIdle signals that file sync is currently idle
+func (s *extractSync) signalFileSyncIdle() {
+	// Close and recreate the idle channel to signal waiting goroutines
+	select {
+	case <-s.fileSyncIdle:
+		// Already closed, recreate it
+	default:
+		close(s.fileSyncIdle)
+	}
+	s.fileSyncIdle = make(chan struct{})
 }
 
 func gitStatusPorcelainHost(repo string, paths []string) ([]statusEntry, error) {

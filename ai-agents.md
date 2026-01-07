@@ -85,7 +85,7 @@ This guide documents the repository purpose, key files, and operational guidelin
 - `dv copy/cp SOURCE DEST` — Copy files between host and container (supports `@:path` for selected agent).
 
 ### Code Sync & Git Integration
-- `dv extract [--sync|--debug|--chdir|--echo-cd]` — Copy the active workspace into `${XDG_DATA_HOME}/dv/discourse_src` (default workdir) or `${XDG_DATA_HOME}/dv/<workdir-slug>_src` for custom workdirs, optionally keep it bidirectionally synced or emit a `cd` command.
+- `dv extract [--sync|--debug|--chdir|--echo-cd]` — Copy the active workspace into `${XDG_DATA_HOME}/dv/discourse_src` (default workdir) or `${XDG_DATA_HOME}/dv/<workdir-slug>_src` for custom workdirs, optionally keep it bidirectionally synced or emit a `cd` command. With `--sync`, file changes are synced bidirectionally and git state (commits, branches) is automatically synced from host to container via git bundle.
 - `dv extract plugin <name>` — Mirror a plugin repo beneath `${XDG_DATA_HOME}/dv/<plugin>_src`, respecting Git remotes.
 - `dv import [--base main]` — Push local commits/uncommitted work from the host repo into the running container.
 - `dv branch BRANCH`, `dv pr NUMBER` — Checkout upstream branches or GitHub PRs inside the container and rerun migrations/seed steps.
