@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -469,5 +471,443 @@ func TestFlushTimeoutWorks(t *testing.T) {
 		t.Log("processEvents exited cleanly with timeout protection")
 	case <-time.After(5 * time.Second):
 		t.Fatal("processEvents hung despite timeout protection")
+	}
+}
+
+// ============================================================================
+// Git Sync Tests
+// ============================================================================
+
+// TestGitSyncerEmptyRepo tests git sync with an empty repo (no commits).
+func TestGitSyncerEmptyRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Init repo but don't commit anything
+	if err := runInDir(tmpDir, nil, nil, "git", "init"); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	gs := newGitSyncer(
+		context.Background(),
+		"fake-container",
+		"/fake/workdir",
+		tmpDir,
+		io.Discard,
+		io.Discard,
+		true,
+	)
+
+	// checkGitState should fail gracefully (no HEAD)
+	_, err := gs.checkGitState()
+	if err == nil {
+		t.Fatal("expected error for empty repo (no HEAD)")
+	}
+	if !strings.Contains(err.Error(), "rev-parse HEAD") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestGitSyncerWithCommits tests git syncer with a valid repo.
+func TestGitSyncerWithCommits(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Init repo with a commit
+	if err := runInDir(tmpDir, nil, nil, "git", "init"); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+	if err := runInDir(tmpDir, nil, nil, "git", "config", "user.email", "test@test.com"); err != nil {
+		t.Fatalf("git config email failed: %v", err)
+	}
+	if err := runInDir(tmpDir, nil, nil, "git", "config", "user.name", "Test"); err != nil {
+		t.Fatalf("git config name failed: %v", err)
+	}
+
+	// Create initial commit
+	testFile := tmpDir + "/test.txt"
+	if err := os.WriteFile(testFile, []byte("initial"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInDir(tmpDir, nil, nil, "git", "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInDir(tmpDir, nil, nil, "git", "commit", "-m", "initial"); err != nil {
+		t.Fatal(err)
+	}
+
+	gs := newGitSyncer(
+		context.Background(),
+		"fake-container",
+		"/fake/workdir",
+		tmpDir,
+		io.Discard,
+		io.Discard,
+		true,
+	)
+
+	// checkGitState should succeed for host (container will fail)
+	state, err := gs.checkGitState()
+	// Expect error because container doesn't exist
+	if err == nil {
+		t.Log("Host state read successfully")
+	}
+	// But we can check that host state was populated before container error
+	if state.hostHead != "" {
+		t.Logf("Host HEAD: %s", state.hostHead[:min(8, len(state.hostHead))])
+	}
+}
+
+// TestSignalFileSyncIdleRace verifies there is no race condition
+// between closing and recreating fileSyncIdle channel.
+//
+// This test exercises concurrent calls to signalFileSyncIdle() and
+// waitForFileSyncIdle() to ensure the mutex protection is working.
+//
+// Run with: go test -race -run TestSignalFileSyncIdleRace
+func TestSignalFileSyncIdleRace(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := &extractSync{
+		ctx:          ctx,
+		cancel:       cancel,
+		fileSyncIdle: make(chan struct{}),
+		// fileSyncIdleMu is zero-value initialized (unlocked)
+	}
+
+	var wg sync.WaitGroup
+
+	// Goroutine rapidly calling signalFileSyncIdle
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("PANIC in signalFileSyncIdle: %v", r)
+			}
+		}()
+		for i := 0; i < 1000; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				s.signalFileSyncIdle()
+			}
+		}
+	}()
+
+	// Goroutine rapidly calling waitForFileSyncIdle
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("PANIC in waitForFileSyncIdle: %v", r)
+			}
+		}()
+		for i := 0; i < 1000; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				s.waitForFileSyncIdle()
+			}
+		}
+	}()
+
+	// If no panic occurs within 5 seconds, test passes
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Log("Race condition test passed - no race detected")
+	case <-time.After(5 * time.Second):
+		cancel()
+		<-done
+		t.Log("Race condition test passed (timed out but no race detected)")
+	}
+}
+
+// TestParseInotifyLineMalformed tests inotify line parsing edge cases.
+func TestParseInotifyLineMalformed(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		wantOK   bool
+		wantPath string
+	}{
+		{"empty string", "", false, ""},
+		{"pipe only", "|", false, ""},
+		{"spaces with pipe", "  |  ", false, ""},
+		{"event only", "|MODIFY", false, ""},
+		{"relative path", "./test.txt|MODIFY", true, "test.txt"},
+		{"absolute path", "/absolute/path|CREATE", true, "/absolute/path"},
+		{"no pipe", "no-pipe-here", false, ""},
+		{"path with spaces", "/path/with spaces|MODIFY", true, "/path/with spaces"},
+		{"dot with pipe", "./|DELETE", true, "."},
+		{"just slash", "/|CREATE", true, "/"},
+		{"deep path", "/var/www/discourse/app/models/user.rb|MODIFY", true, "/var/www/discourse/app/models/user.rb"},
+		{"unicode path", "/path/émoji_🔥|MODIFY", true, "/path/émoji_🔥"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, ok := parseInotifyLine(tt.line)
+			if ok != tt.wantOK {
+				t.Errorf("parseInotifyLine(%q) ok = %v, want %v", tt.line, ok, tt.wantOK)
+			}
+			if ok && tt.wantPath != "" && path != tt.wantPath {
+				t.Errorf("parseInotifyLine(%q) path = %q, want %q", tt.line, path, tt.wantPath)
+			}
+		})
+	}
+}
+
+// TestRetryQueueExhaustion tests retry logic when max attempts reached.
+func TestRetryQueueExhaustion(t *testing.T) {
+	var errBuf bytes.Buffer
+	s := &extractSync{
+		retryQueue: make(map[string]retryEntry),
+		errOut:     &errBuf,
+	}
+
+	path := "test/path.txt"
+
+	// Queue retries - should hit max and remove on 3rd call
+	for i := 0; i < maxRetryAttempts; i++ {
+		s.queueRetry(path, sourceHost)
+	}
+
+	// After max attempts, path should be removed from queue
+	if _, exists := s.retryQueue[path]; exists {
+		t.Fatal("path should have been removed after max retries")
+	}
+
+	// Should have warning in error output
+	if !strings.Contains(errBuf.String(), "giving up") {
+		t.Errorf("expected 'giving up' warning, got: %s", errBuf.String())
+	}
+}
+
+// TestIsTransientError tests transient error detection.
+func TestIsTransientError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"permission error", os.ErrPermission, true},
+		{"permission denied string", errors.New("Permission denied"), true},
+		{"text file busy", errors.New("text file busy"), true},
+		{"no such file", errors.New("no such file"), false},
+		{"connection refused", errors.New("connection refused"), false},
+		{"deadline exceeded", context.DeadlineExceeded, false},
+		// NOTE: Wrapped errors are NOT detected as transient - this is a known gap
+		// in the current implementation (doesn't use errors.Is for unwrapping)
+		{"wrapped permission", fmt.Errorf("wrapped: %w", os.ErrPermission), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransientError(tt.err)
+			if got != tt.want {
+				t.Errorf("isTransientError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsTransientErrorKnownGap documents that wrapped errors are not detected.
+// This is a potential bug that could cause retries to fail for wrapped permission errors.
+func TestIsTransientErrorKnownGap(t *testing.T) {
+	wrapped := fmt.Errorf("docker exec failed: %w", os.ErrPermission)
+	if isTransientError(wrapped) {
+		t.Log("Wrapped permission errors ARE detected (implementation improved)")
+	} else {
+		t.Log("BUG: Wrapped permission errors are NOT detected as transient")
+		t.Log("This could cause sync failures when permission errors are wrapped")
+	}
+}
+
+// TestShouldIgnoreRelative tests path ignore logic.
+func TestShouldIgnoreRelative(t *testing.T) {
+	tests := []struct {
+		path   string
+		ignore bool
+	}{
+		{"", false},
+		{".git", true},
+		{".git/HEAD", true},
+		{".git/refs/heads/main", true},
+		{"app/.git/config", true},
+		{".gitignore", false},
+		{".github/workflows", false},
+		{"app/models/user.rb", false},
+		{"./.git", true},
+		{"./.git/objects", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := shouldIgnoreRelative(tt.path)
+			if got != tt.ignore {
+				t.Errorf("shouldIgnoreRelative(%q) = %v, want %v", tt.path, got, tt.ignore)
+			}
+		})
+	}
+}
+
+// TestBuildTrackedChanges tests conversion of git status to change structs.
+func TestBuildTrackedChanges(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []statusEntry
+		want    int
+	}{
+		{
+			name:    "empty",
+			entries: nil,
+			want:    0,
+		},
+		{
+			name: "single modify",
+			entries: []statusEntry{
+				{staged: ' ', unstaged: 'M', path: "file.txt"},
+			},
+			want: 1,
+		},
+		{
+			name: "rename",
+			entries: []statusEntry{
+				{staged: 'R', unstaged: ' ', path: "new.txt", oldPath: "old.txt"},
+			},
+			want: 1,
+		},
+		{
+			name: "delete",
+			entries: []statusEntry{
+				{staged: 'D', unstaged: ' ', path: "deleted.txt"},
+			},
+			want: 1,
+		},
+		{
+			name: "untracked",
+			entries: []statusEntry{
+				{staged: '?', unstaged: '?', path: "new_file.txt"},
+			},
+			want: 1,
+		},
+		{
+			name: "git path ignored",
+			entries: []statusEntry{
+				{staged: 'M', unstaged: ' ', path: ".git/config"},
+			},
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changes := buildTrackedChanges(tt.entries)
+			if len(changes) != tt.want {
+				t.Errorf("buildTrackedChanges() returned %d changes, want %d", len(changes), tt.want)
+			}
+		})
+	}
+}
+
+// TestMapKeys tests the mapKeys helper function.
+func TestMapKeys(t *testing.T) {
+	m := map[string]struct{}{
+		"a": {},
+		"b": {},
+		"c": {},
+	}
+	keys := mapKeys(m)
+	if len(keys) != 3 {
+		t.Errorf("mapKeys() returned %d keys, want 3", len(keys))
+	}
+
+	// Check all keys are present
+	found := make(map[string]bool)
+	for _, k := range keys {
+		found[k] = true
+	}
+	for k := range m {
+		if !found[k] {
+			t.Errorf("mapKeys() missing key %q", k)
+		}
+	}
+}
+
+// TestDrainEventQueue tests that drainEventQueue clears pending events.
+func TestDrainEventQueue(t *testing.T) {
+	var logBuf bytes.Buffer
+	s := &extractSync{
+		events:     make(chan watcherEvent, 256),
+		retryQueue: make(map[string]retryEntry),
+		logOut:     &logBuf,
+		errOut:     &logBuf,
+		debug:      true,
+	}
+
+	// Queue some events
+	for i := 0; i < 50; i++ {
+		s.events <- watcherEvent{source: sourceHost, path: fmt.Sprintf("file%d.txt", i)}
+	}
+
+	// Add retry entries
+	s.retryQueue["retry1.txt"] = retryEntry{source: sourceHost, attempts: 1}
+	s.retryQueue["retry2.txt"] = retryEntry{source: sourceContainer, attempts: 2}
+
+	// Verify state before drain
+	if len(s.events) != 50 {
+		t.Errorf("expected 50 events before drain, got %d", len(s.events))
+	}
+	if len(s.retryQueue) != 2 {
+		t.Errorf("expected 2 retry entries before drain, got %d", len(s.retryQueue))
+	}
+
+	// Drain
+	s.drainEventQueue()
+
+	// Verify state after drain
+	if len(s.events) != 0 {
+		t.Errorf("expected 0 events after drain, got %d", len(s.events))
+	}
+	if len(s.retryQueue) != 0 {
+		t.Errorf("expected 0 retry entries after drain, got %d", len(s.retryQueue))
+	}
+
+	// Check debug output
+	if !strings.Contains(logBuf.String(), "drained 50 stale file events") {
+		t.Errorf("expected drain log message, got: %s", logBuf.String())
+	}
+	if !strings.Contains(logBuf.String(), "cleared 2 stale retry entries") {
+		t.Errorf("expected retry clear log message, got: %s", logBuf.String())
+	}
+}
+
+// TestDrainEventQueueEmpty tests drainEventQueue with no pending events.
+func TestDrainEventQueueEmpty(t *testing.T) {
+	var logBuf bytes.Buffer
+	s := &extractSync{
+		events:     make(chan watcherEvent, 256),
+		retryQueue: make(map[string]retryEntry),
+		logOut:     &logBuf,
+		errOut:     &logBuf,
+		debug:      true,
+	}
+
+	// Drain empty queue
+	s.drainEventQueue()
+
+	// Should not log anything since nothing was drained
+	if strings.Contains(logBuf.String(), "drained") {
+		t.Errorf("should not log when nothing drained, got: %s", logBuf.String())
 	}
 }

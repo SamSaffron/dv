@@ -12,6 +12,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -86,6 +88,8 @@ type extractSync struct {
 	gitEvents      chan struct{}
 	fileSyncPaused bool
 	fileSyncIdle   chan struct{} // Closed when file sync is idle
+	fileSyncIdleMu sync.Mutex    // Protects fileSyncIdle channel
+	gitSyncPending int32         // Atomic flag: 1 if git sync is pending, 0 otherwise
 }
 
 var errSyncSkipped = errors.New("sync skipped")
@@ -139,11 +143,27 @@ func (s *extractSync) run() error {
 	g, ctx := errgroup.WithContext(s.ctx)
 	s.ctx = ctx
 
-	g.Go(s.runHostWatcher)
-	g.Go(s.runContainerWatcher)
-	g.Go(s.processEvents)
-	g.Go(s.runGitWatcher)
-	g.Go(s.processGitEvents)
+	s.debugf("starting goroutines...")
+	g.Go(func() error {
+		s.debugf("runHostWatcher starting")
+		return s.runHostWatcher()
+	})
+	g.Go(func() error {
+		s.debugf("runContainerWatcher starting")
+		return s.runContainerWatcher()
+	})
+	g.Go(func() error {
+		s.debugf("processEvents starting")
+		return s.processEvents()
+	})
+	g.Go(func() error {
+		s.debugf("runGitWatcher starting")
+		return s.runGitWatcher()
+	})
+	g.Go(func() error {
+		s.debugf("processGitEvents starting")
+		return s.processGitEvents()
+	})
 
 	if err := g.Wait(); err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -369,28 +389,53 @@ func (s *extractSync) processEvents() error {
 			flushDone <- nil
 		}()
 
-		select {
-		case err := <-flushDone:
-			return err
-		case <-s.ctx.Done():
-			// Context cancelled while flushing - wait briefly for clean exit
+		// Use a ticker to periodically check if git sync became pending
+		// If flush is taking > 1 second and git sync is pending, abort early
+		gitCheckTicker := time.NewTicker(1 * time.Second)
+		defer gitCheckTicker.Stop()
+		timeoutTimer := time.NewTimer(timeout)
+		defer timeoutTimer.Stop()
+
+		for {
 			select {
-			case <-flushDone:
-			case <-time.After(2 * time.Second):
-				s.debugf("flush interrupted by context cancellation")
+			case err := <-flushDone:
+				return err
+			case <-s.ctx.Done():
+				// Context cancelled while flushing - wait briefly for clean exit
+				select {
+				case <-flushDone:
+				case <-time.After(2 * time.Second):
+					s.debugf("flush interrupted by context cancellation")
+				}
+				return nil
+			case <-gitCheckTicker.C:
+				// Check if git sync became pending - if so, abort flush early
+				// Git operations take priority since file events may be stale
+				if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+					s.debugf("flush aborted: git sync pending (flush taking too long)")
+					return nil
+				}
+			case <-timeoutTimer.C:
+				s.debugf("flush timed out after %v - possible docker hang", timeout)
+				// Don't return error - just log and continue. The goroutine will
+				// eventually complete or be abandoned.
+				return nil
 			}
-			return nil
-		case <-time.After(timeout):
-			s.debugf("flush timed out after %v - possible docker hang", timeout)
-			// Don't return error - just log and continue. The goroutine will
-			// eventually complete or be abandoned.
-			return nil
 		}
 	}
 
+	// Ticker to periodically signal idle while git sync is pending
+	// This ensures waitForFileSyncIdle can receive the signal even if
+	// it starts after the initial signal was sent
+	idleTicker := time.NewTicker(25 * time.Millisecond)
+	defer idleTicker.Stop()
+
 	for {
-		// Signal idle state when no pending events and timer not active
-		if !timerActive && len(hostPaths) == 0 && len(containerPaths) == 0 {
+		// Signal idle state when no pending events and timer not active,
+		// OR when git sync is pending (we're deferring to git sync)
+		isIdle := !timerActive && len(hostPaths) == 0 && len(containerPaths) == 0
+		gitPending := atomic.LoadInt32(&s.gitSyncPending) == 1
+		if isIdle || gitPending {
 			s.signalFileSyncIdle()
 		}
 
@@ -407,6 +452,13 @@ func (s *extractSync) processEvents() error {
 			// Final flush with short timeout on cleanup
 			_ = flushWithTimeout(2 * time.Second)
 			return nil
+		case <-idleTicker.C:
+			// Periodically signal idle while git sync is pending
+			// This handles the case where waitForFileSyncIdle starts
+			// after we already signaled (and recreated the channel)
+			if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+				s.signalFileSyncIdle()
+			}
 		case event := <-s.events:
 			if event.source == sourceHost {
 				hostPaths[event.path] = struct{}{}
@@ -430,6 +482,17 @@ func (s *extractSync) processEvents() error {
 				s.debugf("file sync paused, skipping flush")
 				continue
 			}
+			// Skip file sync if git sync is pending - the file events are likely
+			// stale due to a git state change (reset, checkout, etc.)
+			// Clear the pending paths and signal idle so git sync can proceed.
+			if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+				s.debugf("git sync pending, deferring file sync (clearing %d host, %d container paths)",
+					len(hostPaths), len(containerPaths))
+				hostPaths = make(map[string]struct{})
+				containerPaths = make(map[string]struct{})
+				s.signalFileSyncIdle()
+				continue
+			}
 			if err := flushWithTimeout(flushTimeout); err != nil {
 				return err
 			}
@@ -439,6 +502,11 @@ func (s *extractSync) processEvents() error {
 
 func (s *extractSync) processHostChanges(paths []string) error {
 	if len(paths) == 0 {
+		return nil
+	}
+	// Check if git sync became pending while we were queued
+	if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+		s.debugf("git sync pending, aborting host changes processing")
 		return nil
 	}
 	s.debugf("host events: %s", strings.Join(paths, ", "))
@@ -453,7 +521,13 @@ func (s *extractSync) processHostChanges(paths []string) error {
 	gitReported := make(map[string]bool)
 
 	changes := buildTrackedChanges(entries)
-	for _, change := range changes {
+	for i, change := range changes {
+		// Check mid-batch if git sync needs priority
+		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+			s.debugf("git sync pending, aborting host changes mid-batch (%d/%d processed)", i, len(changes))
+			return nil
+		}
+
 		gitReported[change.path] = true
 		if change.oldPath != "" {
 			gitReported[change.oldPath] = true
@@ -506,7 +580,13 @@ func (s *extractSync) processHostChanges(paths []string) error {
 	}
 
 	// For paths the watcher reported but git didn't, check if they need sync
-	for _, rel := range paths {
+	for i, rel := range paths {
+		// Check mid-batch if git sync needs priority
+		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+			s.debugf("git sync pending, aborting host path check mid-batch (%d/%d processed)", i, len(paths))
+			return nil
+		}
+
 		if gitReported[rel] || shouldIgnoreRelative(rel) {
 			continue
 		}
@@ -585,6 +665,11 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
+	// Check if git sync became pending while we were queued
+	if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+		s.debugf("git sync pending, aborting container changes processing")
+		return nil
+	}
 	s.debugf("container events: %s", strings.Join(paths, ", "))
 
 	// Ask git about these paths - it will filter out gitignored files
@@ -597,7 +682,13 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 	gitReported := make(map[string]bool)
 
 	changes := buildTrackedChanges(entries)
-	for _, change := range changes {
+	for i, change := range changes {
+		// Check mid-batch if git sync needs priority
+		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+			s.debugf("git sync pending, aborting container changes mid-batch (%d/%d processed)", i, len(changes))
+			return nil
+		}
+
 		gitReported[change.path] = true
 		if change.oldPath != "" {
 			gitReported[change.oldPath] = true
@@ -650,7 +741,13 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 	}
 
 	// For paths the watcher reported but git didn't, check if they need sync
-	for _, rel := range paths {
+	for i, rel := range paths {
+		// Check mid-batch if git sync needs priority
+		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
+			s.debugf("git sync pending, aborting container path check mid-batch (%d/%d processed)", i, len(paths))
+			return nil
+		}
+
 		if gitReported[rel] || shouldIgnoreRelative(rel) {
 			continue
 		}
@@ -740,6 +837,13 @@ func (s *extractSync) runGitWatcher() error {
 		s.debugf("could not watch .git/HEAD: %v", err)
 	}
 
+	// Watch logs/HEAD - this is the most reliable way to detect commits,
+	// as it gets appended to on every commit, merge, checkout, reset, etc.
+	logsHead := filepath.Join(gitDir, "logs", "HEAD")
+	if err := watcher.Add(logsHead); err != nil {
+		s.debugf("could not watch .git/logs/HEAD: %v", err)
+	}
+
 	// Watch refs/heads directory (changes on commit, branch create/delete)
 	refsHeads := filepath.Join(gitDir, "refs", "heads")
 	if err := watcher.Add(refsHeads); err != nil {
@@ -764,11 +868,15 @@ func (s *extractSync) runGitWatcher() error {
 				continue
 			}
 			s.debugf("git state change detected: %s (%s)", event.Name, event.Op)
+			// IMMEDIATELY mark git sync as pending - this prevents file sync
+			// from processing stale events while we wait for debounce
+			atomic.StoreInt32(&s.gitSyncPending, 1)
 			// Signal git sync needed (non-blocking)
 			select {
 			case s.gitEvents <- struct{}{}:
+				s.debugf("git event signal sent to processGitEvents")
 			default:
-				// Already have a pending sync
+				s.debugf("git event signal dropped (already pending)")
 			}
 		}
 	}
@@ -777,6 +885,7 @@ func (s *extractSync) runGitWatcher() error {
 // processGitEvents handles git sync events with debouncing
 func (s *extractSync) processGitEvents() error {
 	const gitSyncDelay = 500 * time.Millisecond
+	s.debugf("processGitEvents: entering event loop")
 
 	timer := time.NewTimer(gitSyncDelay)
 	if !timer.Stop() {
@@ -792,6 +901,7 @@ func (s *extractSync) processGitEvents() error {
 			}
 			return nil
 		case <-s.gitEvents:
+			s.debugf("git event received, starting %v debounce", gitSyncDelay)
 			if timerActive {
 				if !timer.Stop() {
 					select {
@@ -804,6 +914,7 @@ func (s *extractSync) processGitEvents() error {
 			timerActive = true
 		case <-timer.C:
 			timerActive = false
+			s.debugf("git sync debounce complete, starting sync")
 			if err := s.performGitSync(); err != nil {
 				fmt.Fprintf(s.errOut, "git sync error: %v\n", err)
 			}
@@ -813,14 +924,50 @@ func (s *extractSync) processGitEvents() error {
 
 // performGitSync pauses file sync and performs git state synchronization
 func (s *extractSync) performGitSync() error {
+	s.debugf("performGitSync: waiting for file sync idle")
 	// Wait for file sync to become idle
 	s.waitForFileSyncIdle()
+	s.debugf("performGitSync: file sync is idle, pausing")
 
 	// Pause file sync during git operations
 	s.fileSyncPaused = true
-	defer func() { s.fileSyncPaused = false }()
+	defer func() {
+		s.fileSyncPaused = false
+		// Clear the pending flag - git sync is complete
+		atomic.StoreInt32(&s.gitSyncPending, 0)
+		s.debugf("performGitSync: complete, file sync resumed")
+	}()
 
+	// Drain queued file events - they're now stale since git state is changing.
+	// After git sync completes, the working trees will match and any real
+	// differences will generate fresh events.
+	s.drainEventQueue()
+
+	s.debugf("performGitSync: calling syncToContainer")
 	return s.gitSyncer.syncToContainer()
+}
+
+// drainEventQueue discards all pending file events from the queue.
+// Used when git sync is about to change the working tree state, making
+// queued events stale.
+func (s *extractSync) drainEventQueue() {
+	drained := 0
+	for {
+		select {
+		case <-s.events:
+			drained++
+		default:
+			if drained > 0 {
+				s.debugf("drained %d stale file events before git sync", drained)
+			}
+			// Also clear retry queue - those paths are stale too
+			if len(s.retryQueue) > 0 {
+				s.debugf("cleared %d stale retry entries before git sync", len(s.retryQueue))
+				s.retryQueue = make(map[string]retryEntry)
+			}
+			return
+		}
+	}
 }
 
 // waitForFileSyncIdle waits until file sync is idle (no pending events)
@@ -828,19 +975,26 @@ func (s *extractSync) waitForFileSyncIdle() {
 	// The fileSyncIdle channel is closed when processEvents has no pending work
 	// We create a new channel each cycle
 	for {
+		// Get channel reference under lock
+		s.fileSyncIdleMu.Lock()
+		ch := s.fileSyncIdle
+		s.fileSyncIdleMu.Unlock()
+
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-s.fileSyncIdle:
+		case <-ch:
 			return
 		case <-time.After(50 * time.Millisecond):
-			// Check again
+			// Check again with fresh channel reference
 		}
 	}
 }
 
 // signalFileSyncIdle signals that file sync is currently idle
 func (s *extractSync) signalFileSyncIdle() {
+	s.fileSyncIdleMu.Lock()
+	defer s.fileSyncIdleMu.Unlock()
 	// Close and recreate the idle channel to signal waiting goroutines
 	select {
 	case <-s.fileSyncIdle:
