@@ -18,7 +18,8 @@ TIMEOUT=120
 
 echo "Waiting for PostgreSQL..."
 for i in $(seq 1 $TIMEOUT); do
-  if pg_isready -h localhost -U discourse -q 2>/dev/null; then
+  # Check socket exists AND pg_isready passes (via socket, not TCP)
+  if [ -S /var/run/postgresql/.s.PGSQL.5432 ] && pg_isready -q 2>/dev/null; then
     echo "PostgreSQL ready after ${i}s"
     break
   fi
