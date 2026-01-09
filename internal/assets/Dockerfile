@@ -61,13 +61,53 @@ puts "Admin ready: username=#{u.username} email=#{u.email}"
 end
 EOF
 
+RUN tee /tmp/wait-for-services.sh > /dev/null <<'EOF'
+#!/bin/bash
+set -e
+TIMEOUT=120
+
+echo "Waiting for PostgreSQL..."
+for i in $(seq 1 $TIMEOUT); do
+  if pg_isready -h localhost -U discourse -q 2>/dev/null; then
+    echo "PostgreSQL ready after ${i}s"
+    break
+  fi
+  if [ $i -eq $TIMEOUT ]; then
+    echo "ERROR: PostgreSQL not ready after ${TIMEOUT}s"
+    exit 1
+  fi
+  sleep 1
+done
+
+echo "Waiting for Redis..."
+for i in $(seq 1 $TIMEOUT); do
+  if redis-cli ping 2>/dev/null | grep -q PONG; then
+    echo "Redis ready after ${i}s"
+    break
+  fi
+  if [ $i -eq $TIMEOUT ]; then
+    echo "ERROR: Redis not ready after ${TIMEOUT}s"
+    exit 1
+  fi
+  sleep 1
+done
+
+echo "All services ready!"
+EOF
+RUN chmod +x /tmp/wait-for-services.sh
+
 RUN /sbin/boot & \
-    sleep 10 && \
-    sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rake db:create' && \
-    sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rake db:migrate' && \
-    sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && RAILS_ENV=test bin/rake db:migrate' && \
-    sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rails r /tmp/seed_users.rb' && \
-    pkill -f "/sbin/boot" || true
+    ( \
+      set -e; \
+      /tmp/wait-for-services.sh; \
+      sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rake db:create'; \
+      sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rake db:migrate'; \
+      sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && RAILS_ENV=test bin/rake db:migrate'; \
+      sudo -H -u discourse /bin/bash -lc 'cd /var/www/discourse && bin/rails r /tmp/seed_users.rb' \
+    ); \
+    status=$?; \
+    pkill -f "/sbin/boot" || true; \
+    exit $status
 
 RUN sudo -H -u discourse /bin/bash -lc "cd /var/www/discourse && npx playwright install-deps && npx playwright install"
 
