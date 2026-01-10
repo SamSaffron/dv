@@ -389,11 +389,6 @@ var agentRules = map[string]agentRule{
 		withPrompt:  func(p string) []string { return []string{"copilot", "-p", p} },
 		defaults:    []string{"--allow-all-tools", "--allow-all-paths"},
 	},
-	"kilocode": {
-		interactive: func() []string { return []string{"kilocode"} },
-		withPrompt:  func(p string) []string { return []string{"kilocode", "-a", p} },
-		defaults:    []string{},
-	},
 	"droid": {
 		interactive: func() []string { return []string{"droid"} },
 		withPrompt:  func(p string) []string { return []string{"droid", "exec", "--skip-permissions-unsafe", p} },

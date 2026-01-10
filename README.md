@@ -453,7 +453,6 @@ Use `copyRules` in your config to copy host files into the container. Each rule 
 {
   "copyRules": [
     { "host": "~/.codex/auth.json",      "container": "/home/discourse/.codex/auth.json",      "agents": ["codex"] },
-    { "host": "~/.kilocode/config.json", "container": "/home/discourse/.kilocode/config.json", "agents": ["kilocode"] },
     { "host": "~/.gemini/GEMINI.md",     "container": "/home/discourse/.gemini/GEMINI.md",     "agents": ["gemini"] },
     { "host": "~/.gemini/*.json",        "container": "/home/discourse/.gemini/",              "agents": ["gemini"] },
     { "host": "~/.gemini/google_account_id",     "container": "/home/discourse/google_account_id",     "agents": ["gemini"] }
@@ -503,7 +502,6 @@ Automatically passed through when set on the host:
 - `AMP_API_KEY`
 - `GH_TOKEN`
 - `OPENROUTER_API_KEY`
-- `KILOCODE_API_KEY`
 - `FACTORY_API_KEY`
 
 ### Build acceleration toggles

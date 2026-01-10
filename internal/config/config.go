@@ -105,7 +105,7 @@ func Default() Config {
 			"CURSOR_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
 			"CLAUDE_CODE_USE_BEDROCK", "DEEPSEEK_API_KEY", "GEMINI_API_KEY",
-			"AMP_API_KEY", "GH_TOKEN", "OPENROUTER_API_KEY", "KILOCODE_API_KEY",
+			"AMP_API_KEY", "GH_TOKEN", "OPENROUTER_API_KEY",
 			"FACTORY_API_KEY", "MISTRAL_API_KEY",
 		},
 		DiscourseRepo:       "https://github.com/discourse/discourse.git",
@@ -220,11 +220,6 @@ func DefaultCopyRules() []CopyRule {
 			Host:      "~/.codex/auth.json",
 			Container: "/home/discourse/.codex/auth.json",
 			Agents:    []string{"codex"},
-		},
-		{
-			Host:      "~/.kilocode/config.json",
-			Container: "/home/discourse/.kilocode/config.json",
-			Agents:    []string{"kilocode"},
 		},
 		{
 			Host:      "~/.gemini/GEMINI.md",
