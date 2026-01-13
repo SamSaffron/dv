@@ -56,6 +56,7 @@ type CopyRule struct {
 	Host      string        `json:"host"`
 	Container string        `json:"container"`
 	Agents    []string      `json:"agents,omitempty"`
+	CopyKeys  []string      `json:"copyKeys,omitempty"`
 	MergeKey  string        `json:"mergeKey,omitempty"`
 	Fallback  *CopyFallback `json:"fallback,omitempty"`
 }
@@ -260,6 +261,7 @@ func DefaultCopyRules() []CopyRule {
 			Host:      "~/.claude.json",
 			Container: "/home/discourse/.claude.json",
 			Agents:    []string{"claude"},
+			CopyKeys:  []string{"oauthAccount", "userID", "hasCompletedOnboarding", "tipsHistory"},
 		},
 	}
 }

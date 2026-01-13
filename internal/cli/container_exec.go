@@ -114,6 +114,13 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 			dstDir := filepath.Dir(target)
 			_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
 
+			if len(rule.CopyKeys) > 0 && strings.HasSuffix(strings.ToLower(hostPath), ".json") {
+				if err := copyJsonKeys(containerName, hostPath, target, rule.CopyKeys); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy keys from %s to %s: %v\n", hostPath, target, err)
+				}
+				continue
+			}
+
 			if rule.MergeKey != "" && strings.HasSuffix(strings.ToLower(hostPath), ".json") {
 				if err := mergeAndCopyJSON(containerName, hostPath, target, rule.MergeKey); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to merge and copy %s to %s: %v\n", hostPath, target, err)
@@ -151,6 +158,64 @@ func runFallbackCommand(command string) (string, error) {
 	}
 	tmpFile.Close()
 	return tmpFile.Name(), nil
+}
+
+func copyJsonKeys(containerName, hostPath, target string, keys []string) error {
+	hostData, err := os.ReadFile(hostPath)
+	if err != nil {
+		return err
+	}
+
+	var hostJSON map[string]any
+	if err := json.Unmarshal(hostData, &hostJSON); err != nil {
+		return fmt.Errorf("failed to parse host JSON %s: %w", hostPath, err)
+	}
+
+	// Extract only specified keys from host
+	extracted := make(map[string]any)
+	for _, key := range keys {
+		if val, ok := hostJSON[key]; ok {
+			extracted[key] = val
+		}
+	}
+
+	// Nothing to copy if none of the keys exist in host
+	if len(extracted) == 0 {
+		return nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "dv-copy-keys-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Try to read existing container JSON, start with empty {} if missing
+	containerJSON := make(map[string]any)
+	containerTmp := filepath.Join(tmpDir, "container.json")
+	if err := docker.CopyFromContainer(containerName, target, containerTmp); err == nil {
+		containerData, err := os.ReadFile(containerTmp)
+		if err == nil && len(containerData) > 0 {
+			_ = json.Unmarshal(containerData, &containerJSON)
+		}
+	}
+
+	// Merge extracted keys into container (host wins for specified keys)
+	for k, v := range extracted {
+		containerJSON[k] = v
+	}
+
+	mergedData, err := json.MarshalIndent(containerJSON, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	mergedTmp := filepath.Join(tmpDir, "merged.json")
+	if err := os.WriteFile(mergedTmp, mergedData, 0o644); err != nil {
+		return err
+	}
+
+	return docker.CopyToContainerWithOwnership(containerName, mergedTmp, target, false)
 }
 
 func mergeAndCopyJSON(containerName, hostPath, target, mergeKey string) error {
