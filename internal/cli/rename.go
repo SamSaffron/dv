@@ -9,6 +9,7 @@ import (
 	"dv/internal/config"
 	"dv/internal/docker"
 	"dv/internal/localproxy"
+	"dv/internal/session"
 	"dv/internal/xdg"
 )
 
@@ -59,6 +60,9 @@ var renameCmd = &cobra.Command{
 		// Update selection and mappings
 		if cfg.SelectedAgent == oldName {
 			cfg.SelectedAgent = newName
+		}
+		if session.GetCurrentAgent() == oldName {
+			_ = session.SetCurrentAgent(newName)
 		}
 		if cfg.ContainerImages != nil {
 			if img, ok := cfg.ContainerImages[oldName]; ok {

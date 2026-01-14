@@ -14,6 +14,7 @@ import (
 
 	"dv/internal/config"
 	"dv/internal/docker"
+	"dv/internal/session"
 	"dv/internal/xdg"
 )
 
@@ -104,6 +105,9 @@ var newCmd = &cobra.Command{
 		}()
 
 		cfg.SelectedAgent = name
+		if err := session.SetCurrentAgent(name); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not save session state: %v\n", err)
+		}
 
 		if verbose || isTruthyEnv("DV_VERBOSE") {
 			fmt.Fprintf(cmd.OutOrStdout(), "Resolving image for agent '%s' (image override: '%s')...\n", name, imageOverride)

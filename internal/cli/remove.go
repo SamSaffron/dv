@@ -9,6 +9,7 @@ import (
 	"dv/internal/config"
 	"dv/internal/docker"
 	"dv/internal/localproxy"
+	"dv/internal/session"
 	"dv/internal/xdg"
 )
 
@@ -114,6 +115,9 @@ var removeCmd = &cobra.Command{
 				break
 			}
 			cfg.SelectedAgent = first
+			if session.GetCurrentAgent() == name {
+				_ = session.SetCurrentAgent(first)
+			}
 			dirty = true
 			if first != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "Selected agent: %s\n", first)
