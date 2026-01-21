@@ -21,6 +21,7 @@ type GenerateAPIKeyOptions struct {
 	ContainerName string
 	Workdir       string
 	Description   string
+	Envs          docker.Envs
 	Verbose       bool
 }
 
@@ -84,7 +85,7 @@ puts admin.username
 	for attempt := 1; attempt <= KeyRetryAttempts; attempt++ {
 		verboseLog("Attempt %d/%d...", attempt, KeyRetryAttempts)
 
-		out, err := docker.ExecOutput(opts.ContainerName, opts.Workdir, []string{"bash", "-lc", cmd})
+		out, err := docker.ExecOutput(opts.ContainerName, opts.Workdir, opts.Envs, []string{"bash", "-lc", cmd})
 		if err != nil {
 			lastErr = fmt.Errorf("rails runner failed: %w\nOutput: %s", err, out)
 			if attempt < KeyRetryAttempts {
@@ -140,13 +141,13 @@ puts admin.username
 }
 
 // ReadCachedKey reads an API key from a container file path
-func ReadCachedKey(containerName, workdir, keyPath string) (string, error) {
+func ReadCachedKey(containerName, workdir, keyPath string, envs docker.Envs) (string, error) {
 	if !docker.Running(containerName) {
 		return "", fmt.Errorf("container not running")
 	}
 
 	readCmd := fmt.Sprintf("cat %s 2>/dev/null", shellQuote(keyPath))
-	out, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-c", readCmd})
+	out, err := docker.ExecOutput(containerName, workdir, envs, []string{"bash", "-c", readCmd})
 	if err != nil {
 		return "", fmt.Errorf("read key file: %w", err)
 	}
@@ -165,7 +166,7 @@ func ReadCachedKey(containerName, workdir, keyPath string) (string, error) {
 }
 
 // SaveKeyToContainer writes an API key to a container file path
-func SaveKeyToContainer(containerName, workdir, keyPath, content string) error {
+func SaveKeyToContainer(containerName, workdir, keyPath, content string, envs docker.Envs) error {
 	if !docker.Running(containerName) {
 		return fmt.Errorf("container not running")
 	}
@@ -178,13 +179,13 @@ func SaveKeyToContainer(containerName, workdir, keyPath, content string) error {
 		shellQuote(keyPath),
 		shellQuote(keyPath),
 	)
-	_, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-c", saveCmd})
+	_, err := docker.ExecOutput(containerName, workdir, envs, []string{"bash", "-c", saveCmd})
 	return err
 }
 
 // EnsureAPIKeyForService generates or retrieves an API key for a specific service.
 // This is the main entry point for theme/MCP key management.
-func EnsureAPIKeyForService(containerName, workdir, description, keyPath string, verbose bool) (string, string, error) {
+func EnsureAPIKeyForService(containerName, workdir, description, keyPath string, envs docker.Envs, verbose bool) (string, string, error) {
 	verboseLog := func(format string, args ...interface{}) {
 		if verbose {
 			fmt.Printf("[discourse-api] "+format+"\n", args...)
@@ -192,7 +193,7 @@ func EnsureAPIKeyForService(containerName, workdir, description, keyPath string,
 	}
 
 	// Try reading cached key first
-	if key, err := ReadCachedKey(containerName, workdir, keyPath); err == nil && key != "" {
+	if key, err := ReadCachedKey(containerName, workdir, keyPath, envs); err == nil && key != "" {
 		verboseLog("Using cached key from %s", keyPath)
 		// We don't have the username cached, but for most uses (theme watcher) we don't need it
 		return key, "", nil
@@ -203,6 +204,7 @@ func EnsureAPIKeyForService(containerName, workdir, description, keyPath string,
 		ContainerName: containerName,
 		Workdir:       workdir,
 		Description:   description,
+		Envs:          envs,
 		Verbose:       verbose,
 	})
 	if err != nil {
@@ -210,7 +212,7 @@ func EnsureAPIKeyForService(containerName, workdir, description, keyPath string,
 	}
 
 	// Cache the key
-	if err := SaveKeyToContainer(containerName, workdir, keyPath, generated.Key+"\n"); err != nil {
+	if err := SaveKeyToContainer(containerName, workdir, keyPath, generated.Key+"\n", envs); err != nil {
 		verboseLog("Warning: failed to cache key: %v", err)
 		// Non-fatal
 	}

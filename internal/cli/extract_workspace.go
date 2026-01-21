@@ -37,7 +37,7 @@ func extractWorkspaceRepo(opts workspaceExtractOptions) error {
 		procErr = opts.cmd.ErrOrStderr()
 	}
 
-	isRepoOut, _ := docker.ExecOutput(opts.containerName, opts.containerWorkdir, []string{"bash", "-lc", "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && echo true || echo false"})
+	isRepoOut, _ := docker.ExecOutput(opts.containerName, opts.containerWorkdir, nil, []string{"bash", "-lc", "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && echo true || echo false"})
 	isRepo := strings.Contains(strings.ToLower(isRepoOut), "true")
 	if !isRepo {
 		return copyWorkspaceDirectory(opts, logOut, "Workspace is not a git repository", false)
@@ -57,7 +57,7 @@ func extractWorkspaceRepo(opts workspaceExtractOptions) error {
 		defer cleanup()
 	}
 
-	status, err := docker.ExecOutput(opts.containerName, opts.containerWorkdir, []string{"bash", "-lc", "git status --porcelain"})
+	status, err := docker.ExecOutput(opts.containerName, opts.containerWorkdir, nil, []string{"bash", "-lc", "git status --porcelain"})
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func extractWorkspaceRepo(opts workspaceExtractOptions) error {
 		}
 	}
 
-	repoCloneURL, _ := docker.ExecOutput(opts.containerName, opts.containerWorkdir, []string{"bash", "-lc", "git config --get remote.origin.url"})
+	repoCloneURL, _ := docker.ExecOutput(opts.containerName, opts.containerWorkdir, nil, []string{"bash", "-lc", "git config --get remote.origin.url"})
 	repoCloneURL = strings.TrimSpace(repoCloneURL)
 	if repoCloneURL == "" {
 		return copyWorkspaceDirectory(opts, logOut, "No git remote detected; copying entire workspace", true)
@@ -94,7 +94,7 @@ func extractWorkspaceRepo(opts workspaceExtractOptions) error {
 		}
 	}
 
-	commit, err := docker.ExecOutput(opts.containerName, opts.containerWorkdir, []string{"bash", "-lc", "git rev-parse HEAD"})
+	commit, err := docker.ExecOutput(opts.containerName, opts.containerWorkdir, nil, []string{"bash", "-lc", "git rev-parse HEAD"})
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func extractWorkspaceRepo(opts workspaceExtractOptions) error {
 		return fmt.Errorf("unable to determine commit in %s", opts.containerWorkdir)
 	}
 
-	containerBranch, err := docker.ExecOutput(opts.containerName, opts.containerWorkdir, []string{"bash", "-lc", "git rev-parse --abbrev-ref HEAD"})
+	containerBranch, err := docker.ExecOutput(opts.containerName, opts.containerWorkdir, nil, []string{"bash", "-lc", "git rev-parse --abbrev-ref HEAD"})
 	if err != nil {
 		containerBranch = ""
 	}

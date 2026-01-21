@@ -327,7 +327,7 @@ func selectModelForRoute(models []string, currentModel string) (string, error) {
 // Helper to read existing router config from container
 
 func readExistingRouter(containerName, workdir, containerConfigPath string) (map[string]string, error) {
-	out, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "cat " + shellQuote(containerConfigPath) + " 2>/dev/null"})
+	out, err := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "cat " + shellQuote(containerConfigPath) + " 2>/dev/null"})
 	if err != nil {
 		return nil, err
 	}

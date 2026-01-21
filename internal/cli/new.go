@@ -193,7 +193,7 @@ var newCmd = &cobra.Command{
 	},
 }
 
-func checkoutPR(cmd *cobra.Command, cfg config.Config, name, workdir string, prNumber int, envs []string) error {
+func checkoutPR(cmd *cobra.Command, cfg config.Config, name, workdir string, prNumber int, envs docker.Envs) error {
 	owner, repo := prSearchOwnerRepoFromContainer(cfg, name)
 	if owner == "" || repo == "" {
 		owner, repo = ownerRepoFromURL(cfg.DiscourseRepo)
@@ -211,7 +211,7 @@ func checkoutPR(cmd *cobra.Command, cfg config.Config, name, workdir string, prN
 	return docker.ExecInteractive(name, workdir, envs, []string{"bash", "-lc", script})
 }
 
-func checkoutBranch(cmd *cobra.Command, cfg config.Config, name, workdir, branchName string, envs []string) error {
+func checkoutBranch(cmd *cobra.Command, cfg config.Config, name, workdir, branchName string, envs docker.Envs) error {
 	if branchName == "main" || branchName == "master" {
 		fmt.Fprintf(cmd.OutOrStdout(), "Updating %s branch...\n", branchName)
 		script := fmt.Sprintf(`
@@ -239,7 +239,7 @@ func uniqueAgentName(base string) string {
 	return name
 }
 
-func runMaintenance(cmd *cobra.Command, name, workdir string, envList []string) error {
+func runMaintenance(cmd *cobra.Command, name, workdir string, envList docker.Envs) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Running maintenance (bundle, migrate)...\n")
 	script := `
 set -e
@@ -281,7 +281,7 @@ func executeTemplate(cmd *cobra.Command, cfg config.Config, name, workdir string
 		fmt.Fprintf(cmd.OutOrStdout(), "Setting up SSH agent forwarding...\n")
 		// Change ownership of the SSH socket to discourse user (it's forwarded from
 		// the host with permissions that don't match the container's discourse user)
-		if _, err := docker.ExecAsRoot(name, workdir, []string{"chown", "discourse:discourse", "/tmp/ssh-agent.sock"}); err != nil {
+		if _, err := docker.ExecAsRoot(name, workdir, nil, []string{"chown", "discourse:discourse", "/tmp/ssh-agent.sock"}); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to chown SSH socket: %v\n", err)
 		}
 		sshSetup := `
@@ -289,7 +289,7 @@ mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 `
-		if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", sshSetup}); err != nil {
+		if _, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", sshSetup}); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to setup SSH known_hosts: %v\n", err)
 		}
 	}
@@ -297,7 +297,7 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	// 2. Maintenance Mode: Stop Services
 	fmt.Fprintf(cmd.OutOrStdout(), "Stopping services for provisioning...\n")
 	stopScript := "sudo /usr/bin/sv force-stop unicorn ember-cli || true"
-	if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", stopScript}); err != nil {
+	if _, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", stopScript}); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to stop services: %v\n", err)
 	}
 
@@ -305,7 +305,7 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	defer func() {
 		fmt.Fprintf(cmd.OutOrStdout(), "Starting services (cleanup)...\n")
 		startScript := "sudo /usr/bin/sv start unicorn ember-cli || true"
-		_, _ = docker.ExecOutput(name, workdir, []string{"bash", "-lc", startScript})
+		_, _ = docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", startScript})
 	}()
 
 	// 3. Discourse branch/PR foundation
@@ -352,13 +352,13 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	// 6. Start Services and Wait for Health
 	fmt.Fprintf(cmd.OutOrStdout(), "Provisioning complete. Starting Discourse and waiting for it to be ready...\n")
 	startScript := "sudo /usr/bin/sv start unicorn ember-cli || true"
-	if _, err = docker.ExecOutput(name, workdir, []string{"bash", "-lc", startScript}); err != nil {
+	if _, err = docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", startScript}); err != nil {
 		return fmt.Errorf("failed to start services: %w", err)
 	}
 
 	// Wait for health check (max 120s)
 	healthCmd := "timeout 120 bash -c 'until curl -s -f http://localhost:4200/srv/status > /dev/null 2>&1; do sleep 2; done' || exit 1"
-	if _, err = docker.ExecOutput(name, workdir, []string{"bash", "-lc", healthCmd}); err != nil {
+	if _, err = docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", healthCmd}); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: Discourse did not become healthy within 120s. Some settings might fail.\n")
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "Discourse is ready.\n")
@@ -370,7 +370,7 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 	// Site Settings
 	if len(tpl.Settings) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Applying site settings...\n")
-		if err = ApplySiteSettings(cmd, cfg, name, tpl.Settings, false, "template"); err != nil {
+		if err = ApplySiteSettings(cmd, cfg, name, tpl.Settings, envList, false, "template"); err != nil {
 			return fmt.Errorf("failed to apply site settings: %w", err)
 		}
 	}
@@ -412,7 +412,7 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 			if !verbose && !isTruthyEnv("DV_VERBOSE") {
 				logFile := fmt.Sprintf("/tmp/dv-on-create-%d.log", i)
 				fmt.Fprintf(cmd.ErrOrStderr(), "on_create command failed. Log content:\n")
-				if logContent, logErr := docker.ExecOutput(name, workdir, []string{"cat", logFile}); logErr == nil {
+				if logContent, logErr := docker.ExecOutput(name, workdir, nil, []string{"cat", logFile}); logErr == nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), logContent)
 				} else {
 					fmt.Fprintf(cmd.ErrOrStderr(), "(Could not read log file: %v)\n", logErr)

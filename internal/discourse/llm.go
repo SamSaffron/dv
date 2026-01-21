@@ -226,7 +226,7 @@ llm.toggle_companion_user
 
 	cmd := fmt.Sprintf("cd %s && RAILS_ENV=development bundle exec rails runner - <<'RUBY'\n%s\nRUBY",
 		shellQuote(c.Workdir), script)
-	docker.ExecOutput(c.ContainerName, c.Workdir, []string{"bash", "-lc", cmd})
+	docker.ExecOutput(c.ContainerName, c.Workdir, c.Envs, []string{"bash", "-lc", cmd})
 }
 
 func buildLLMPayload(input CreateLLMInput) map[string]interface{} {

@@ -63,7 +63,7 @@ if has_service unicorn; then sv force-stop unicorn || true; fi
 if has_service ember-cli; then sv force-stop ember-cli || true; fi
 if has_service caddy; then sv force-stop caddy || true; fi
 sleep 1`
-		_, _ = docker.ExecAsRoot(name, workdir, []string{"bash", "-lc", stopScript})
+		_, _ = docker.ExecAsRoot(name, workdir, nil, []string{"bash", "-lc", stopScript})
 
 		// Start available services
 		fmt.Fprintf(cmd.OutOrStdout(), "Starting services (if present)...\n")
@@ -74,7 +74,7 @@ if has_service unicorn; then sv start unicorn || true; fi
 if has_service ember-cli; then sv start ember-cli || true; fi
 if has_service caddy; then sv start caddy || true; fi
 sleep 1`
-		_, _ = docker.ExecAsRoot(name, workdir, []string{"bash", "-lc", startScript})
+		_, _ = docker.ExecAsRoot(name, workdir, nil, []string{"bash", "-lc", startScript})
 
 		// Print status only for services that exist
 		fmt.Fprintf(cmd.OutOrStdout(), "Service status:\n")
@@ -88,7 +88,7 @@ if [ ${#services[@]} -gt 0 ]; then
 else
   echo "No runit services found"
 fi`
-		if out, err := docker.ExecAsRoot(name, workdir, []string{"bash", "-lc", statusScript}); err == nil {
+		if out, err := docker.ExecAsRoot(name, workdir, nil, []string{"bash", "-lc", statusScript}); err == nil {
 			fmt.Fprint(cmd.OutOrStdout(), out)
 		}
 

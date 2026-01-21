@@ -86,7 +86,7 @@ Use 'dv extract plugin <name>' or 'dv extract theme <name>' for tab completion.`
 				extractPath = path.Join(imgCfg.Workdir, extractPath)
 			}
 			// Verify path exists in container
-			existsOut, err := docker.ExecOutput(name, "/", []string{"bash", "-lc", fmt.Sprintf("[ -d %q ] && echo OK || echo MISSING", extractPath)})
+			existsOut, err := docker.ExecOutput(name, "/", nil, []string{"bash", "-lc", fmt.Sprintf("[ -d %q ] && echo OK || echo MISSING", extractPath)})
 			if err != nil || !strings.Contains(existsOut, "OK") {
 				return fmt.Errorf("path '%s' not found in container", extractPath)
 			}
@@ -141,7 +141,7 @@ Use 'dv extract plugin <name>' or 'dv extract theme <name>' for tab completion.`
 			})
 		}
 		// Check for changes
-		status, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git status --porcelain"})
+		status, err := docker.ExecOutput(name, work, nil, []string{"bash", "-lc", "git status --porcelain"})
 		if err != nil {
 			return err
 		}
@@ -206,12 +206,12 @@ Use 'dv extract plugin <name>' or 'dv extract theme <name>' for tab completion.`
 		}
 
 		// Get container commit and branch
-		commit, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git rev-parse HEAD"})
+		commit, err := docker.ExecOutput(name, work, nil, []string{"bash", "-lc", "git rev-parse HEAD"})
 		if err != nil {
 			return err
 		}
 		commit = strings.TrimSpace(commit)
-		containerBranch, err := docker.ExecOutput(name, work, []string{"bash", "-lc", "git rev-parse --abbrev-ref HEAD"})
+		containerBranch, err := docker.ExecOutput(name, work, nil, []string{"bash", "-lc", "git rev-parse --abbrev-ref HEAD"})
 		if err != nil {
 			return err
 		}

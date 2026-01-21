@@ -207,7 +207,7 @@ var configCcrCmd = &cobra.Command{
 		workdir := imgCfg.Workdir
 
 		// Ensure CCR binary exists
-		if _, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "command -v ccr"}); err != nil {
+		if _, err := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "command -v ccr"}); err != nil {
 			return fmt.Errorf("ccr CLI not found in container '%s'; install it with `npm install -g @musistudio/claude-code-router` inside the container", containerName)
 		}
 
@@ -397,7 +397,7 @@ var configCcrCmd = &cobra.Command{
 			return err
 		}
 
-		if _, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.claude-code-router"}); err != nil {
+		if _, err := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "mkdir -p ~/.claude-code-router"}); err != nil {
 			return err
 		}
 		if err := docker.CopyToContainerWithOwnership(containerName, updatedPath, containerConfigPath, false); err != nil {
@@ -410,7 +410,7 @@ var configCcrCmd = &cobra.Command{
 			return nil
 		}
 
-		envs := make([]string, 0, 3)
+		envs := make(docker.Envs, 0, 3)
 		if _, ok := os.LookupEnv("TERM"); ok {
 			envs = append(envs, "TERM")
 		}
@@ -539,7 +539,7 @@ func writeConfigToContainer(ccrCfg map[string]interface{}, containerName, workdi
 		return err
 	}
 
-	if _, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.claude-code-router"}); err != nil {
+	if _, err := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "mkdir -p ~/.claude-code-router"}); err != nil {
 		return err
 	}
 	if err := docker.CopyToContainerWithOwnership(containerName, updatedPath, containerConfigPath, false); err != nil {

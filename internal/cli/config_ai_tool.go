@@ -219,7 +219,7 @@ func init() {
 
 func ensureAiToolsRoot(containerName string) error {
 	cmd := "mkdir -p /home/discourse/ai-tools"
-	if _, err := docker.ExecOutput(containerName, "/home/discourse", []string{"bash", "-lc", cmd}); err != nil {
+	if _, err := docker.ExecOutput(containerName, "/home/discourse", nil, []string{"bash", "-lc", cmd}); err != nil {
 		return fmt.Errorf("failed to create /home/discourse/ai-tools: %w", err)
 	}
 	return nil
@@ -244,7 +244,7 @@ STDOUT.sync = true
 print(JSON.generate(payload))
 `
 	script := fmt.Sprintf("cd %s && bundle exec rails runner %s", shellQuote(ctx.discourseRoot), shellQuote(ruby))
-	out, err := docker.ExecOutput(ctx.containerName, ctx.discourseRoot, []string{"bash", "-lc", script})
+	out, err := docker.ExecOutput(ctx.containerName, ctx.discourseRoot, nil, []string{"bash", "-lc", script})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch AI tool presets: %v\n%s", err, strings.TrimSpace(out))
 	}

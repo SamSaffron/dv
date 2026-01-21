@@ -194,7 +194,7 @@ func getDiscourseHostname(name string, verbose bool, out io.Writer) (string, err
 	if verbose {
 		fmt.Fprintln(out, "[verbose] Querying Discourse hostname...")
 	}
-	hostname, err := docker.ExecOutput(name, "/var/www/discourse", []string{
+	hostname, err := docker.ExecOutput(name, "/var/www/discourse", nil, []string{
 		"bin/rails", "runner", "puts Discourse.current_hostname",
 	})
 	if err != nil {

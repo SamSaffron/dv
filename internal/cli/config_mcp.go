@@ -66,7 +66,7 @@ var configMcpCmd = &cobra.Command{
 		mcpName := strings.ToLower(strings.TrimSpace(args[0]))
 
 		// Prepare env pass-through so tools like 'claude' have credentials
-		envs := make([]string, 0, len(cfg.EnvPassthrough))
+		envs := make(docker.Envs, 0, len(cfg.EnvPassthrough))
 		for _, key := range cfg.EnvPassthrough {
 			if val, ok := os.LookupEnv(key); ok && val != "" {
 				envs = append(envs, key)
@@ -153,7 +153,7 @@ func addOrReplaceTomlSection(existing string, sectionHeader string, sectionBody 
 	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
 }
 
-func configurePlaywrightMCP(cmd *cobra.Command, containerName, workdir string, envs []string) error {
+func configurePlaywrightMCP(cmd *cobra.Command, containerName, workdir string, envs docker.Envs) error {
 	mcpConfig := mcpConfiguration{
 		name:            "playwright",
 		registrationCmd: "claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --isolated --no-sandbox --headless --executable-path /usr/bin/chromium",
@@ -165,7 +165,7 @@ func configurePlaywrightMCP(cmd *cobra.Command, containerName, workdir string, e
 	return configureMCP(cmd, containerName, workdir, envs, mcpConfig)
 }
 
-func configureChromeDevToolsMCP(cmd *cobra.Command, containerName, workdir string, envs []string) error {
+func configureChromeDevToolsMCP(cmd *cobra.Command, containerName, workdir string, envs docker.Envs) error {
 	mcpConfig := mcpConfiguration{
 		name:            "chrome-devtools",
 		registrationCmd: "claude mcp add -s user chrome-devtools -- npx -y chrome-devtools-mcp@latest --headless",
@@ -177,9 +177,9 @@ func configureChromeDevToolsMCP(cmd *cobra.Command, containerName, workdir strin
 	return configureMCP(cmd, containerName, workdir, envs, mcpConfig)
 }
 
-func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, envs []string) error {
+func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, envs docker.Envs) error {
 	// Dynamically determine the home directory for the discourse user
-	homeDirRaw, err := docker.ExecOutput(containerName, "/", []string{"bash", "-lc", "echo $HOME"})
+	homeDirRaw, err := docker.ExecOutput(containerName, "/", nil, []string{"bash", "-lc", "echo $HOME"})
 	if err != nil {
 		return fmt.Errorf("failed to determine home directory in container: %w", err)
 	}
@@ -195,12 +195,12 @@ func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, en
 
 	fmt.Fprintln(cmd.OutOrStdout(), "Preparing Discourse MCP profile with read/write access to local instance...")
 
-	if _, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + profileDir}); err != nil {
+	if _, err := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "mkdir -p " + profileDir}); err != nil {
 		return fmt.Errorf("failed to ensure discourse-mcp config directory: %w", err)
 	}
 
 	readCmd := fmt.Sprintf("if [ -f %q ]; then cat %q; fi", profilePath, profilePath)
-	existingProfile, err := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", readCmd})
+	existingProfile, err := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", readCmd})
 	if err != nil {
 		return fmt.Errorf("failed to read existing MCP profile: %w", err)
 	}
@@ -240,6 +240,7 @@ func configureDiscourseMCP(cmd *cobra.Command, containerName, workdir string, en
 			ContainerName: containerName,
 			Workdir:       workdir,
 			Description:   apiKeyDescription,
+			Envs:          envs,
 			Verbose:       false,
 		})
 		if err != nil {
@@ -305,9 +306,9 @@ type mcpConfiguration struct {
 }
 
 // configureMCP registers an MCP server with Claude, Codex, and Gemini
-func configureMCP(cmd *cobra.Command, containerName, workdir string, envs []string, mcpConfig mcpConfiguration) error {
+func configureMCP(cmd *cobra.Command, containerName, workdir string, envs docker.Envs, mcpConfig mcpConfiguration) error {
 	// Dynamically determine the home directory for the discourse user
-	homeDirRaw, err := docker.ExecOutput(containerName, "/", []string{"bash", "-lc", "echo $HOME"})
+	homeDirRaw, err := docker.ExecOutput(containerName, "/", nil, []string{"bash", "-lc", "echo $HOME"})
 	if err != nil {
 		return fmt.Errorf("failed to determine home directory in container: %w", err)
 	}
@@ -346,8 +347,8 @@ func configureMCP(cmd *cobra.Command, containerName, workdir string, envs []stri
 	// Configure Codex
 	fmt.Fprintf(cmd.OutOrStdout(), "\nConfiguring Codex to use the %s MCP (updating ~/.codex/config.toml)...\n", mcpConfig.name)
 
-	_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.codex"})
-	existsOut, _ := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "test -f " + codexConfigPath + " && echo EXISTS || echo MISSING"})
+	_, _ = docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "mkdir -p ~/.codex"})
+	existsOut, _ := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "test -f " + codexConfigPath + " && echo EXISTS || echo MISSING"})
 	hasCodexConfig := strings.Contains(existsOut, "EXISTS")
 
 	hostCodexCfg := filepath.Join(tmpDir, "codex-config.toml")
@@ -387,8 +388,8 @@ func configureMCP(cmd *cobra.Command, containerName, workdir string, envs []stri
 	// Configure Gemini
 	fmt.Fprintf(cmd.OutOrStdout(), "\nConfiguring Gemini CLI to use the %s MCP (updating ~/.gemini/settings.json)...\n", mcpConfig.name)
 
-	_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p ~/.gemini"})
-	existsOut, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "test -f " + geminiConfigPath + " && echo EXISTS || echo MISSING"})
+	_, _ = docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "mkdir -p ~/.gemini"})
+	existsOut, _ = docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "test -f " + geminiConfigPath + " && echo EXISTS || echo MISSING"})
 	hasGeminiConfig := strings.Contains(existsOut, "EXISTS")
 
 	hostGeminiCfg := filepath.Join(tmpDir, "gemini-settings.json")

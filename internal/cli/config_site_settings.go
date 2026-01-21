@@ -99,10 +99,10 @@ func runSiteSettings(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("parse YAML: %w", err)
 	}
 
-	return ApplySiteSettings(cmd, cfg, containerName, settings, dryRun, filename)
+	return ApplySiteSettings(cmd, cfg, containerName, settings, collectEnvPassthrough(cfg), dryRun, filename)
 }
 
-func ApplySiteSettings(cmd *cobra.Command, cfg config.Config, containerName string, settings map[string]interface{}, dryRun bool, filename string) error {
+func ApplySiteSettings(cmd *cobra.Command, cfg config.Config, containerName string, settings map[string]interface{}, envs docker.Envs, dryRun bool, filename string) error {
 	// Check container state
 	if !docker.Exists(containerName) {
 		return fmt.Errorf("container '%s' does not exist; run 'dv start' first", containerName)
@@ -166,7 +166,7 @@ func ApplySiteSettings(cmd *cobra.Command, cfg config.Config, containerName stri
 	}
 
 	// Create Discourse client
-	client, err := discourse.NewClientWrapper(containerName, cfg, false)
+	client, err := discourse.NewClientWrapper(containerName, cfg, envs, false)
 	if err != nil {
 		return fmt.Errorf("create discourse client: %w", err)
 	}

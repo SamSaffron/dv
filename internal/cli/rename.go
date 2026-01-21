@@ -95,7 +95,7 @@ var renameCmd = &cobra.Command{
 					"sed -i 's/\\b%s\\b/%s/g' /etc/hosts; grep -q '\\b%s\\b' /etc/hosts || echo '127.0.0.1 %s' >> /etc/hosts",
 					proxyHost, newHost, newHost, newHost,
 				)}
-				_, _ = docker.ExecAsRoot(newName, "/", cmdLine)
+				_, _ = docker.ExecAsRoot(newName, "/", nil, cmdLine)
 			}
 
 			if localproxy.Running(cfg.LocalProxy) && containerPort > 0 {

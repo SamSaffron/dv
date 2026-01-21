@@ -19,7 +19,7 @@ import (
 type containerExecContext struct {
 	name    string
 	workdir string
-	envs    []string
+	envs    docker.Envs
 }
 
 func prepareContainerExecContext(cmd *cobra.Command, overrideName ...string) (containerExecContext, bool, error) {
@@ -112,7 +112,7 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 		for _, hostPath := range validPaths {
 			target := containerPathFor(rule.Container, hostPath)
 			dstDir := filepath.Dir(target)
-			_, _ = docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
+			_, _ = docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
 
 			if len(rule.CopyKeys) > 0 && strings.HasSuffix(strings.ToLower(hostPath), ".json") {
 				if err := copyJsonKeys(containerName, hostPath, target, rule.CopyKeys); err != nil {
@@ -295,8 +295,8 @@ func deepMerge(dst, src map[string]any, mergeKey string) map[string]any {
 	return out
 }
 
-func collectEnvPassthrough(cfg config.Config) []string {
-	envs := make([]string, 0, len(cfg.EnvPassthrough)+1)
+func collectEnvPassthrough(cfg config.Config) docker.Envs {
+	envs := make(docker.Envs, 0, len(cfg.EnvPassthrough)+1)
 	for _, key := range cfg.EnvPassthrough {
 		if val, ok := os.LookupEnv(key); ok && val != "" {
 			envs = append(envs, key)

@@ -58,7 +58,7 @@ for d in plugins/*; do
   fi
 done
 `
-		out, err := docker.ExecOutput(name, work, []string{"bash", "-lc", script})
+		out, err := docker.ExecOutput(name, work, nil, []string{"bash", "-lc", script})
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -127,7 +127,7 @@ done
 
 		// Verify plugin directory exists
 		pluginRel := filepath.Join("plugins", pluginName)
-		existsOut, err := docker.ExecOutput(name, work, []string{"bash", "-lc", fmt.Sprintf("[ -d %q ] && echo OK || echo MISSING", pluginRel)})
+		existsOut, err := docker.ExecOutput(name, work, nil, []string{"bash", "-lc", fmt.Sprintf("[ -d %q ] && echo OK || echo MISSING", pluginRel)})
 		if err != nil || !strings.Contains(existsOut, "OK") {
 			return fmt.Errorf("plugin '%s' not found in %s", pluginName, filepath.Join(work, "plugins"))
 		}

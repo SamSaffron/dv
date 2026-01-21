@@ -282,10 +282,10 @@ func repoOwnerRepoFromContainer(cfg config.Config, containerName string) (string
 		workdir = "/var/www/discourse"
 	}
 	// Prefer upstream if present, else fall back to origin
-	upOut, _ := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "git config --get remote.upstream.url || true"})
+	upOut, _ := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "git config --get remote.upstream.url || true"})
 	remoteURL := strings.TrimSpace(upOut)
 	if remoteURL == "" {
-		out, _ := docker.ExecOutput(containerName, workdir, []string{"bash", "-lc", "git config --get remote.origin.url || true"})
+		out, _ := docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "git config --get remote.origin.url || true"})
 		remoteURL = strings.TrimSpace(out)
 	}
 	if remoteURL == "" {

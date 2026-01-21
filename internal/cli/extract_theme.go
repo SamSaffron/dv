@@ -51,7 +51,7 @@ for d in /home/discourse/*/; do
   fi
 done
 `
-		out, err := docker.ExecOutput(name, "/home/discourse", []string{"bash", "-lc", script})
+		out, err := docker.ExecOutput(name, "/home/discourse", nil, []string{"bash", "-lc", script})
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -112,7 +112,7 @@ done
 
 		// Verify theme directory exists
 		themePath := filepath.Join("/home/discourse", themeName)
-		existsOut, err := docker.ExecOutput(name, "/home/discourse", []string{"bash", "-lc", fmt.Sprintf("[ -d %q ] && echo OK || echo MISSING", themePath)})
+		existsOut, err := docker.ExecOutput(name, "/home/discourse", nil, []string{"bash", "-lc", fmt.Sprintf("[ -d %q ] && echo OK || echo MISSING", themePath)})
 		if err != nil || !strings.Contains(existsOut, "OK") {
 			return fmt.Errorf("theme '%s' not found at %s", themeName, themePath)
 		}

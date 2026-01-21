@@ -192,20 +192,20 @@ var importCmd = &cobra.Command{
 		}
 		inContainerTmp := filepath.Join("/tmp", tmpBase)
 		inContainerPatches := filepath.Join(inContainerTmp, "patches")
-		if _, err := docker.ExecAsRoot(name, "/", []string{"chmod", "-R", "755", inContainerTmp}); err != nil {
+		if _, err := docker.ExecAsRoot(name, "/", nil, []string{"chmod", "-R", "755", inContainerTmp}); err != nil {
 			return fmt.Errorf("failed to set permissions on patches directory: %v", err)
 		}
 
 		// Inside container: ensure a clean state and the base SHA is available,
 		// then align base branch and create/checkout current branch at base
-		if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git reset --hard && git clean -fd"}); err != nil {
+		if _, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", "git reset --hard && git clean -fd"}); err != nil {
 			return fmt.Errorf("container: failed to reset working tree: %v", err)
 		}
 		// Ensure we have the full history needed for 3-way application
 		// 1) Make sure origin fetches all branches
-		_, _ = docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'"})
+		_, _ = docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", "git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'"})
 		// 2) De-shallow if necessary, otherwise perform a normal fetch
-		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git fetch origin --tags --prune --depth=0 || git fetch origin --tags --prune --unshallow || git fetch origin --tags --prune"}); err != nil {
+		if out, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", "git fetch origin --tags --prune --depth=0 || git fetch origin --tags --prune --unshallow || git fetch origin --tags --prune"}); err != nil {
 			return fmt.Errorf("container: failed to fetch refs: %v\n%s", err, strings.TrimSpace(out))
 		}
 		// 3) Force-align base branch name to the exact baseSha without failing when already checked out
@@ -224,14 +224,14 @@ var importCmd = &cobra.Command{
 			"fi",
 			"git reset --hard \"$sha\"",
 		}, "\n")
-		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", alignCmd}); err != nil {
+		if out, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", alignCmd}); err != nil {
 			return fmt.Errorf("container: failed to set base branch %s to %s: %v\n%s", base, baseSha, err, strings.TrimSpace(out))
 		}
-		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", fmt.Sprintf("git checkout %s && git reset --hard %s", shellQuote(base), shellQuote(baseSha))}); err != nil {
+		if out, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", fmt.Sprintf("git checkout %s && git reset --hard %s", shellQuote(base), shellQuote(baseSha))}); err != nil {
 			return fmt.Errorf("container: failed to checkout/reset base %s at %s: %v\n%s", base, baseSha, err, strings.TrimSpace(out))
 		}
 		// 4) Create/reset the working branch to start at baseSha
-		if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", fmt.Sprintf("git checkout -B %s %s", shellQuote(branch), shellQuote(baseSha))}); err != nil {
+		if out, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", fmt.Sprintf("git checkout -B %s %s", shellQuote(branch), shellQuote(baseSha))}); err != nil {
 			return fmt.Errorf("container: failed to checkout branch %s: %v\n%s", branch, err, strings.TrimSpace(out))
 		}
 
@@ -239,14 +239,14 @@ var importCmd = &cobra.Command{
 		// Prefer host identity; otherwise use sensible fallbacks.
 		{
 			getCfg := func(key string) string {
-				out, _ := docker.ExecOutput(name, workdir, []string{"bash", "-lc", fmt.Sprintf("git config --get %s || true", shellQuote(key))})
+				out, _ := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", fmt.Sprintf("git config --get %s || true", shellQuote(key))})
 				return strings.TrimSpace(out)
 			}
 			setCfg := func(key, val string) {
 				if strings.TrimSpace(val) == "" {
 					return
 				}
-				_, _ = docker.ExecOutput(name, workdir, []string{"bash", "-lc", fmt.Sprintf("git config %s %s", shellQuote(key), shellQuote(val))})
+				_, _ = docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", fmt.Sprintf("git config %s %s", shellQuote(key), shellQuote(val))})
 			}
 
 			cName := getCfg("user.name")
@@ -271,12 +271,12 @@ var importCmd = &cobra.Command{
 		if len(patchFiles) > 0 {
 			// Use glob expansion in shell for *.patch
 			cmdline := fmt.Sprintf("set -euo pipefail; shopt -s nullglob; files=(%s/*.patch); if (( ${#files[@]} > 0 )); then git am --3way --committer-date-is-author-date --whitespace=nowarn --no-gpg-sign \"${files[@]}\"; fi", inContainerPatches)
-			if out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", cmdline}); err != nil {
+			if out, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", cmdline}); err != nil {
 				// Attempt to abort to leave repo clean
-				_, _ = docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git am --abort || true"})
+				_, _ = docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", "git am --abort || true"})
 				// Capture current git identity for diagnostics
-				cNameOut, _ := docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git config --get user.name || true"})
-				cEmailOut, _ := docker.ExecOutput(name, workdir, []string{"bash", "-lc", "git config --get user.email || true"})
+				cNameOut, _ := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", "git config --get user.name || true"})
+				cEmailOut, _ := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", "git config --get user.email || true"})
 				cName := strings.TrimSpace(cNameOut)
 				cEmail := strings.TrimSpace(cEmailOut)
 				return fmt.Errorf(
@@ -312,7 +312,7 @@ var importCmd = &cobra.Command{
 					quoted = append(quoted, shellQuote(filepath.Join(workdir, d)))
 				}
 				mkdirCmd := fmt.Sprintf("mkdir -p %s", strings.Join(quoted, " "))
-				if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", mkdirCmd}); err != nil {
+				if _, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", mkdirCmd}); err != nil {
 					return fmt.Errorf("container: failed to create directories: %v", err)
 				}
 			}
@@ -332,7 +332,7 @@ var importCmd = &cobra.Command{
 				quoted = append(quoted, shellQuote(filepath.Join(workdir, rel)))
 			}
 			rmCmd := fmt.Sprintf("rm -f %s", strings.Join(quoted, " "))
-			if _, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", rmCmd}); err != nil {
+			if _, err := docker.ExecOutput(name, workdir, nil, []string{"bash", "-lc", rmCmd}); err != nil {
 				return fmt.Errorf("container: failed to delete files: %v", err)
 			}
 		}

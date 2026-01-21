@@ -120,7 +120,7 @@ configuring new models, and are passed to the container when testing connections
 		}
 
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		client, err := discourse.NewClientWrapper(containerName, cfg, verbose)
+		client, err := discourse.NewClientWrapper(containerName, cfg, collectEnvPassthrough(cfg), verbose)
 		if err != nil {
 			return fmt.Errorf("create discourse client: %w", err)
 		}

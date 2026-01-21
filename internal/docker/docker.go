@@ -424,7 +424,7 @@ func RunDetached(name, workdir, image string, hostPort, containerPort int, label
 	return cmd.Run()
 }
 
-func ExecInteractive(name, workdir string, envs []string, argv []string) error {
+func ExecInteractive(name, workdir string, envs Envs, argv []string) error {
 	args := []string{"exec", "-i", "--user", "discourse", "-w", workdir}
 	// Add -t only when both stdin and stdout are TTYs
 	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
@@ -441,7 +441,7 @@ func ExecInteractive(name, workdir string, envs []string, argv []string) error {
 }
 
 // ExecInteractiveAsRoot runs an interactive command inside the container as root.
-func ExecInteractiveAsRoot(name, workdir string, envs []string, argv []string) error {
+func ExecInteractiveAsRoot(name, workdir string, envs Envs, argv []string) error {
 	args := []string{"exec", "-i", "--user", "root", "-w", workdir}
 	// Add -t only when both stdin and stdout are TTYs
 	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
@@ -457,22 +457,35 @@ func ExecInteractiveAsRoot(name, workdir string, envs []string, argv []string) e
 	return cmd.Run()
 }
 
-func ExecOutput(name, workdir string, argv []string) (string, error) {
+// Envs is a typed slice for container environment variables.
+// Using a distinct type prevents accidental argument swaps with argv.
+type Envs []string
+
+// ExecOutput runs a command inside the container as the discourse user.
+// Use nil for envs when no environment variables are needed.
+func ExecOutput(name, workdir string, envs Envs, argv []string) (string, error) {
 	args := []string{"exec", "--user", "discourse", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
 	args = append(args, name)
 	args = append(args, argv...)
 	cmd := exec.Command("docker", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	return string(out), err
 }
 
-// ExecAsRoot runs a command inside the container as root, returning combined output.
-func ExecAsRoot(name, workdir string, argv []string) (string, error) {
+// ExecAsRoot runs a command inside the container as root, returning output.
+// Use nil for envs when no environment variables are needed.
+func ExecAsRoot(name, workdir string, envs Envs, argv []string) (string, error) {
 	args := []string{"exec", "--user", "root", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
 	args = append(args, name)
 	args = append(args, argv...)
 	cmd := exec.Command("docker", args...)
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	return string(out), err
 }
 
@@ -512,7 +525,7 @@ func CopyToContainerWithOwnership(name, srcOnHost, dstInContainer string, recurs
 	}
 	chownArgs = append(chownArgs, "discourse:discourse", dstInContainer)
 
-	if _, err := ExecAsRoot(name, "/", chownArgs); err != nil {
+	if _, err := ExecAsRoot(name, "/", nil, chownArgs); err != nil {
 		return fmt.Errorf("failed to set ownership on %s: %w", dstInContainer, err)
 	}
 	return nil

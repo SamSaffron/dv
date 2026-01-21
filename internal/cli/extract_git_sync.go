@@ -223,7 +223,7 @@ func (g *gitSyncer) applyBundle(bundlePath string, state gitSyncState) error {
 	}
 
 	// Clean up bundle in container
-	docker.ExecOutput(g.containerName, "/", []string{"rm", "-f", containerBundle})
+	docker.ExecOutput(g.containerName, "/", nil, []string{"rm", "-f", containerBundle})
 
 	return nil
 }
@@ -259,7 +259,7 @@ func (g *gitSyncer) hostGitOutput(args ...string) (string, error) {
 // containerGitOutput runs a git command in the container and returns output
 func (g *gitSyncer) containerGitOutput(args ...string) (string, error) {
 	fullArgs := append([]string{"git"}, args...)
-	out, err := docker.ExecOutput(g.containerName, g.workdir, fullArgs)
+	out, err := docker.ExecOutput(g.containerName, g.workdir, nil, fullArgs)
 	return strings.TrimSpace(out), err
 }
 

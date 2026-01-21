@@ -5,6 +5,7 @@ import (
 
 	"dv/internal/ai"
 	"dv/internal/config"
+	"dv/internal/docker"
 )
 
 // ClientWrapper wraps the HTTP client and implements DiscourseClient interface
@@ -13,8 +14,8 @@ type ClientWrapper struct {
 }
 
 // NewClientWrapper creates a new Discourse client for the given container.
-func NewClientWrapper(containerName string, cfg config.Config, verbose bool) (*ClientWrapper, error) {
-	httpClient, err := NewClient(containerName, cfg, verbose)
+func NewClientWrapper(containerName string, cfg config.Config, envs docker.Envs, verbose bool) (*ClientWrapper, error) {
+	httpClient, err := NewClient(containerName, cfg, envs, verbose)
 	if err != nil {
 		return nil, err
 	}

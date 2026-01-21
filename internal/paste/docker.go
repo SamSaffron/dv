@@ -12,13 +12,15 @@ import (
 
 	"github.com/creack/pty"
 	"golang.org/x/term"
+
+	"dv/internal/docker"
 )
 
 // DockerExecConfig configures how to run docker exec with paste support.
 type DockerExecConfig struct {
 	ContainerName string
 	Workdir       string
-	Envs          []string
+	Envs          docker.Envs
 	Argv          []string
 	User          string
 	ImageTempDir  string // Directory in container for temp images (default: /tmp/dv-images)

@@ -35,6 +35,7 @@ type Client struct {
 	ContainerName string
 	Workdir       string
 	Verbose       bool
+	Envs          docker.Envs // Environment variables for container execution
 	httpClient    *http.Client
 
 	// hostKeyCache is the path to the host-side key cache file
@@ -55,7 +56,7 @@ type KeyEntry struct {
 
 // NewClient creates a new Discourse API client for the given container.
 // It automatically discovers the base URL and loads cached credentials.
-func NewClient(containerName string, cfg config.Config, verbose bool) (*Client, error) {
+func NewClient(containerName string, cfg config.Config, envs docker.Envs, verbose bool) (*Client, error) {
 	imgCfg := cfg.Images[cfg.SelectedImage]
 	workdir := config.EffectiveWorkdir(cfg, imgCfg, containerName)
 
@@ -69,6 +70,7 @@ func NewClient(containerName string, cfg config.Config, verbose bool) (*Client, 
 		ContainerName: containerName,
 		Workdir:       workdir,
 		Verbose:       verbose,
+		Envs:          envs,
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
@@ -78,12 +80,13 @@ func NewClient(containerName string, cfg config.Config, verbose bool) (*Client, 
 }
 
 // NewClientWithURL creates a client with an explicit base URL (for testing or custom setups)
-func NewClientWithURL(containerName, baseURL, workdir string, verbose bool) *Client {
+func NewClientWithURL(containerName, baseURL, workdir string, envs docker.Envs, verbose bool) *Client {
 	return &Client{
 		BaseURL:       baseURL,
 		ContainerName: containerName,
 		Workdir:       workdir,
 		Verbose:       verbose,
+		Envs:          envs,
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
@@ -132,7 +135,7 @@ func (c *Client) loadKeyFromContainer() error {
 	}
 
 	readCmd := fmt.Sprintf("cat %s 2>/dev/null", shellQuote(ContainerKeyPath))
-	out, err := docker.ExecOutput(c.ContainerName, c.Workdir, []string{"bash", "-c", readCmd})
+	out, err := docker.ExecOutput(c.ContainerName, c.Workdir, c.Envs, []string{"bash", "-c", readCmd})
 	if err != nil {
 		return fmt.Errorf("read key file: %w", err)
 	}
@@ -189,7 +192,7 @@ puts admin.username
 	cmd := fmt.Sprintf("cd %s && RAILS_ENV=development bundle exec rails runner - <<'RUBY'\n%s\nRUBY",
 		shellQuote(c.Workdir), rubyScript)
 
-	out, err := docker.ExecOutput(c.ContainerName, c.Workdir, []string{"bash", "-lc", cmd})
+	out, err := docker.ExecOutput(c.ContainerName, c.Workdir, c.Envs, []string{"bash", "-lc", cmd})
 	if err != nil {
 		return fmt.Errorf("rails runner failed: %w\nOutput: %s", err, out)
 	}
@@ -249,7 +252,7 @@ func (c *Client) saveKeyToContainer() error {
 		shellQuote(ContainerKeyPath),
 		shellQuote(ContainerKeyPath),
 	)
-	_, err := docker.ExecOutput(c.ContainerName, c.Workdir, []string{"bash", "-c", saveCmd})
+	_, err := docker.ExecOutput(c.ContainerName, c.Workdir, c.Envs, []string{"bash", "-c", saveCmd})
 	return err
 }
 

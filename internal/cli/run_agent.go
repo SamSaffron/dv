@@ -195,7 +195,7 @@ var runAgentCmd = &cobra.Command{
 			// If this is a pure help request, capture output via non-TTY exec
 			if isHelpArgs(rawArgs) {
 				shellCmd := withUserPaths(shellJoin(argv))
-				out, err := docker.ExecOutput(name, workdir, []string{"bash", "-lc", shellCmd})
+				out, err := docker.ExecOutput(name, workdir, envs, []string{"bash", "-lc", shellCmd})
 				if err != nil {
 					fmt.Fprint(cmd.ErrOrStderr(), out)
 					return err
@@ -252,9 +252,9 @@ func collectPromptInteractive(cmd *cobra.Command) (string, error) {
 	return strings.TrimSpace(pm.ta.Value()), nil
 }
 
-func buildAgentEnv(cfg config.Config, agent string, cmd *cobra.Command) []string {
+func buildAgentEnv(cfg config.Config, agent string, cmd *cobra.Command) docker.Envs {
 	if agent == "ccr" {
-		envs := make([]string, 0, 3)
+		envs := make(docker.Envs, 0, 3)
 		if _, ok := os.LookupEnv("TERM"); ok {
 			envs = append(envs, "TERM")
 		}
@@ -269,7 +269,7 @@ func buildAgentEnv(cfg config.Config, agent string, cmd *cobra.Command) []string
 		return envs
 	}
 
-	envs := make([]string, 0, len(cfg.EnvPassthrough)+3)
+	envs := make(docker.Envs, 0, len(cfg.EnvPassthrough)+3)
 	for _, key := range cfg.EnvPassthrough {
 		if val, ok := os.LookupEnv(key); ok && strings.TrimSpace(val) != "" {
 			// docker exec -e KEY will copy host value
