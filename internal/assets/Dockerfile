@@ -138,7 +138,7 @@ RUN mkdir -p /etc/service/ember-cli && \
 #!/bin/bash
 
 cd /var/www/discourse
-HOME=/home/discourse UNICORN_PORT=9292 USER=discourse exec chpst -u discourse:discourse -U discourse:discourse bin/ember-cli
+HOME=/home/discourse UNICORN_PORT=9292 USER=discourse exec chpst -u discourse:discourse -U discourse:discourse bin/ember-cli >> /var/www/discourse/log/ember-cli.log 2>&1
 EOF
 RUN chmod +x /etc/service/ember-cli/run
 RUN tee /etc/service/ember-cli/finish > /dev/null <<'EOF'
@@ -158,8 +158,8 @@ RUN chmod +x /etc/runit/3.d/02-ember-cli
 RUN mkdir -p /etc/service/caddy && \
     tee /etc/service/caddy/run > /dev/null <<'EOF'
 #!/bin/bash
-caddy trust
-exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+caddy trust >> /var/log/caddy.log 2>&1
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile >> /var/log/caddy.log 2>&1
 EOF
 RUN chmod +x /etc/service/caddy/run
 RUN tee /etc/service/caddy/finish > /dev/null <<'EOF'
