@@ -526,17 +526,21 @@ The image is based on `discourse/discourse_dev:release` and includes:
 
 Runit services log to the following locations inside the container:
 
-| Service   | Log Path                              |
-|-----------|---------------------------------------|
-| unicorn   | `/var/www/discourse/log/unicorn.log`  |
-| ember-cli | `/var/www/discourse/log/ember-cli.log`|
-| caddy     | `/var/log/caddy.log`                  |
+| Service    | Log Path                              |
+|------------|---------------------------------------|
+| unicorn    | `/var/www/discourse/log/unicorn.log`  |
+| ember-cli  | `/var/www/discourse/log/ember-cli.log`|
+| caddy      | `/var/log/caddy.log`                  |
+| postgresql | `/var/log/postgres/current`           |
+| redis      | `/var/log/redis/current`              |
 
 View logs with:
 ```bash
 dv run -- tail -f /var/www/discourse/log/unicorn.log
 dv run -- tail -f /var/www/discourse/log/ember-cli.log
-dv run -- tail /var/log/caddy.log
+dv run --root -- tail /var/log/caddy.log
+dv run --root -- tail /var/log/postgres/current
+dv run --root -- tail /var/log/redis/current
 ```
 
 ## File Structure
