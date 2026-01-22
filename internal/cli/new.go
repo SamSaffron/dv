@@ -157,7 +157,11 @@ var newCmd = &cobra.Command{
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Creating agent '%s' from image '%s'...\n", name, imageTag)
 		// initialize container by running a no-op command
-		if err = ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, false, sshAuthSock); err != nil {
+		var templateEnvs map[string]string
+		if tpl != nil {
+			templateEnvs = tpl.Env
+		}
+		if err = ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, false, sshAuthSock, templateEnvs); err != nil {
 			return err
 		}
 		containerCreated = true

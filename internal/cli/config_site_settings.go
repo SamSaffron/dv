@@ -63,7 +63,7 @@ type settingResult struct {
 
 func runSiteSettings(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "Missing required argument: FILENAME\n")
+		fmt.Fprintln(cmd.OutOrStdout(), "Missing required argument: FILENAME")
 		return cmd.Help()
 	}
 	filename := args[0]
@@ -148,7 +148,7 @@ func ApplySiteSettings(cmd *cobra.Command, cfg config.Config, containerName stri
 	sort.Strings(keys)
 
 	if dryRun {
-		fmt.Fprintln(cmd.OutOrStdout(), "DRY RUN - No changes will be made\n")
+		fmt.Fprintln(cmd.OutOrStdout(), "DRY RUN - No changes will be made")
 		fmt.Fprintln(cmd.OutOrStdout(), "Would apply:")
 		for _, key := range keys {
 			value, ok := resolved[key]

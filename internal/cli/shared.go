@@ -232,10 +232,10 @@ func ensureContainerRunning(cmd *cobra.Command, cfg config.Config, name string, 
 	}
 	workdir := imgCfg.Workdir
 	imageTag := imgCfg.Tag
-	return ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, reset, sshAuthSock)
+	return ensureContainerRunningWithWorkdir(cmd, cfg, name, workdir, imageTag, imgName, reset, sshAuthSock, nil)
 }
 
-func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, name string, workdir string, imageTag string, imgName string, reset bool, sshAuthSock string) error {
+func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, name string, workdir string, imageTag string, imgName string, reset bool, sshAuthSock string, templateEnvs map[string]string) error {
 	if reset && docker.Exists(name) {
 		_ = docker.Stop(name)
 		_ = docker.Remove(name)
@@ -265,6 +265,10 @@ func ensureContainerRunningWithWorkdir(cmd *cobra.Command, cfg config.Config, na
 		}
 		envs := map[string]string{
 			"DISCOURSE_PORT": strconv.Itoa(chosenPort),
+		}
+		// Add template envs (persisted to container)
+		for k, v := range templateEnvs {
+			envs[k] = v
 		}
 		extraHosts := []string{}
 		proxyHost := applyLocalProxyMetadata(cfg, name, chosenPort, cfg.ContainerPort, labels, envs)
