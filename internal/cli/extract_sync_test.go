@@ -30,6 +30,7 @@ func TestProcessEventsFlushTimeout(t *testing.T) {
 		errOut:        &logBuf,
 		debug:         true,
 		events:        make(chan watcherEvent, 256),
+		fileSyncIdle:  make(chan struct{}),
 	}
 
 	// Start processEvents in a goroutine
@@ -113,6 +114,7 @@ func TestTimerResetRace(t *testing.T) {
 		errOut:        &logBuf,
 		debug:         false,
 		events:        make(chan watcherEvent, 256),
+		fileSyncIdle:  make(chan struct{}),
 	}
 
 	// Start processEvents
@@ -171,6 +173,7 @@ func TestChannelCapacityUnderLoad(t *testing.T) {
 		errOut:        &logBuf,
 		debug:         false,
 		events:        make(chan watcherEvent, 10), // Intentionally small
+		fileSyncIdle:  make(chan struct{}),
 	}
 
 	// Start processEvents
@@ -263,6 +266,7 @@ func TestProcessHostChangesWithSlowDocker(t *testing.T) {
 		errOut:        &logBuf,
 		debug:         true,
 		events:        make(chan watcherEvent, 256),
+		fileSyncIdle:  make(chan struct{}),
 	}
 
 	// Modify the file to create a change
@@ -324,6 +328,7 @@ func TestFlushTimeoutDuringCancellation(t *testing.T) {
 		errOut:        &logBuf,
 		debug:         true,
 		events:        make(chan watcherEvent, 256),
+		fileSyncIdle:  make(chan struct{}),
 	}
 
 	done := make(chan error, 1)
@@ -405,6 +410,7 @@ func TestNormalFlushHasNoTimeout(t *testing.T) {
 		errOut:        &logBuf,
 		debug:         true,
 		events:        make(chan watcherEvent, 256),
+		fileSyncIdle:  make(chan struct{}),
 	}
 
 	// Modify the file
@@ -449,6 +455,7 @@ func TestFlushTimeoutWorks(t *testing.T) {
 		errOut:        &logBuf,
 		debug:         true,
 		events:        make(chan watcherEvent, 256),
+		fileSyncIdle:  make(chan struct{}),
 	}
 
 	done := make(chan error, 1)
