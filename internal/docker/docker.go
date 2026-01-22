@@ -3,6 +3,7 @@ package docker
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -476,6 +477,21 @@ func ExecOutput(name, workdir string, envs Envs, argv []string) (string, error) 
 	return string(out), err
 }
 
+// ExecOutputContext runs a command inside the container as the discourse user with context.
+// Use nil for envs when no environment variables are needed.
+// Returns stdout only; use ExecCombinedOutputContext if you need stderr too.
+func ExecOutputContext(ctx context.Context, name, workdir string, envs Envs, argv []string) (string, error) {
+	args := []string{"exec", "--user", "discourse", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.Output()
+	return string(out), err
+}
+
 // ExecCombinedOutput runs a command inside the container as the discourse user.
 // Use nil for envs when no environment variables are needed.
 // Returns both stdout and stderr combined.
@@ -487,6 +503,21 @@ func ExecCombinedOutput(name, workdir string, envs Envs, argv []string) (string,
 	args = append(args, name)
 	args = append(args, argv...)
 	cmd := exec.Command("docker", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// ExecCombinedOutputContext runs a command inside the container as the discourse user with context.
+// Use nil for envs when no environment variables are needed.
+// Returns both stdout and stderr combined.
+func ExecCombinedOutputContext(ctx context.Context, name, workdir string, envs Envs, argv []string) (string, error) {
+	args := []string{"exec", "--user", "discourse", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -506,6 +537,21 @@ func ExecAsRoot(name, workdir string, envs Envs, argv []string) (string, error) 
 	return string(out), err
 }
 
+// ExecAsRootContext runs a command inside the container as root with context, returning output.
+// Use nil for envs when no environment variables are needed.
+// Returns stdout only; use ExecAsRootCombinedContext if you need stderr too.
+func ExecAsRootContext(ctx context.Context, name, workdir string, envs Envs, argv []string) (string, error) {
+	args := []string{"exec", "--user", "root", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.Output()
+	return string(out), err
+}
+
 // ExecAsRootCombined runs a command inside the container as root.
 // Use nil for envs when no environment variables are needed.
 // Returns both stdout and stderr combined.
@@ -521,6 +567,21 @@ func ExecAsRootCombined(name, workdir string, envs Envs, argv []string) (string,
 	return string(out), err
 }
 
+// ExecAsRootCombinedContext runs a command inside the container as root with context.
+// Use nil for envs when no environment variables are needed.
+// Returns both stdout and stderr combined.
+func ExecAsRootCombinedContext(ctx context.Context, name, workdir string, envs Envs, argv []string) (string, error) {
+	args := []string{"exec", "--user", "root", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 func CopyFromContainer(name, srcInContainer, dstOnHost string) error {
 	cmd := exec.Command("docker", "cp", fmt.Sprintf("%s:%s", name, srcInContainer), dstOnHost)
 	if isTruthyEnv("DV_VERBOSE") {
@@ -532,8 +593,30 @@ func CopyFromContainer(name, srcInContainer, dstOnHost string) error {
 	return cmd.Run()
 }
 
+func CopyFromContainerContext(ctx context.Context, name, srcInContainer, dstOnHost string) error {
+	cmd := exec.CommandContext(ctx, "docker", "cp", fmt.Sprintf("%s:%s", name, srcInContainer), dstOnHost)
+	if isTruthyEnv("DV_VERBOSE") {
+		cmd.Stdout = os.Stdout
+	} else {
+		cmd.Stdout = io.Discard
+	}
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func CopyToContainer(name, srcOnHost, dstInContainer string) error {
 	cmd := exec.Command("docker", "cp", srcOnHost, fmt.Sprintf("%s:%s", name, dstInContainer))
+	if isTruthyEnv("DV_VERBOSE") {
+		cmd.Stdout = os.Stdout
+	} else {
+		cmd.Stdout = io.Discard
+	}
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func CopyToContainerContext(ctx context.Context, name, srcOnHost, dstInContainer string) error {
+	cmd := exec.CommandContext(ctx, "docker", "cp", srcOnHost, fmt.Sprintf("%s:%s", name, dstInContainer))
 	if isTruthyEnv("DV_VERBOSE") {
 		cmd.Stdout = os.Stdout
 	} else {
@@ -558,6 +641,25 @@ func CopyToContainerWithOwnership(name, srcOnHost, dstInContainer string, recurs
 	chownArgs = append(chownArgs, "discourse:discourse", dstInContainer)
 
 	if _, err := ExecAsRoot(name, "/", nil, chownArgs); err != nil {
+		return fmt.Errorf("failed to set ownership on %s: %w", dstInContainer, err)
+	}
+	return nil
+}
+
+// CopyToContainerWithOwnershipContext copies a file or directory into a container with context
+// and sets its ownership to discourse:discourse. If recursive is true, ownership is set recursively.
+func CopyToContainerWithOwnershipContext(ctx context.Context, name, srcOnHost, dstInContainer string, recursive bool) error {
+	if err := CopyToContainerContext(ctx, name, srcOnHost, dstInContainer); err != nil {
+		return err
+	}
+
+	chownArgs := []string{"chown"}
+	if recursive {
+		chownArgs = append(chownArgs, "-R")
+	}
+	chownArgs = append(chownArgs, "discourse:discourse", dstInContainer)
+
+	if _, err := ExecAsRootContext(ctx, name, "/", nil, chownArgs); err != nil {
 		return fmt.Errorf("failed to set ownership on %s: %w", dstInContainer, err)
 	}
 	return nil

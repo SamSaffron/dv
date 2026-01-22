@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"dv/internal/docker"
 )
 
 // TestProcessEventsFlushTimeout verifies that processEvents doesn't hang
@@ -306,7 +309,7 @@ func TestCopyHostToContainerSkipsIfFileVanishes(t *testing.T) {
 		errOut:        io.Discard,
 	}
 
-	err := s.copyHostToContainer("spec/lib/.conform.7348585.search_spec.rb")
+	err := s.copyHostToContainer(context.Background(), "spec/lib/.conform.7348585.search_spec.rb")
 	if err == nil || !errors.Is(err, errSyncSkipped) {
 		t.Fatalf("expected errSyncSkipped, got %v", err)
 	}
@@ -478,6 +481,117 @@ func TestFlushTimeoutWorks(t *testing.T) {
 		t.Log("processEvents exited cleanly with timeout protection")
 	case <-time.After(5 * time.Second):
 		t.Fatal("processEvents hung despite timeout protection")
+	}
+}
+
+func TestPerformGitSyncAutoSyncContainerChanges(t *testing.T) {
+	ctx := context.Background()
+
+	hostDir := t.TempDir()
+	if err := runInDir(hostDir, nil, nil, "git", "init"); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+	if err := runInDir(hostDir, nil, nil, "git", "config", "user.email", "test@test.com"); err != nil {
+		t.Fatalf("git config email failed: %v", err)
+	}
+	if err := runInDir(hostDir, nil, nil, "git", "config", "user.name", "Test"); err != nil {
+		t.Fatalf("git config name failed: %v", err)
+	}
+	hostFile := filepath.Join(hostDir, "file.txt")
+	originalHost := []byte("host")
+	if err := os.WriteFile(hostFile, originalHost, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInDir(hostDir, nil, nil, "git", "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInDir(hostDir, nil, nil, "git", "commit", "-m", "initial"); err != nil {
+		t.Fatal(err)
+	}
+
+	containerRoot := t.TempDir()
+	containerDir := filepath.Join(containerRoot, "container")
+	if err := runInDir("", nil, nil, "git", "clone", hostDir, containerDir); err != nil {
+		t.Fatalf("git clone failed: %v", err)
+	}
+
+	containerFile := filepath.Join(containerDir, "file.txt")
+	if err := os.WriteFile(containerFile, []byte("container"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origExecOutput := dockerExecOutput
+	origExecAsRoot := dockerExecAsRoot
+	origCopyFrom := dockerCopyFromContainer
+	origCopyTo := dockerCopyToContainerWithOwnership
+	t.Cleanup(func() {
+		dockerExecOutput = origExecOutput
+		dockerExecAsRoot = origExecAsRoot
+		dockerCopyFromContainer = origCopyFrom
+		dockerCopyToContainerWithOwnership = origCopyTo
+	})
+
+	dockerExecOutput = func(ctx context.Context, _ string, workdir string, _ docker.Envs, argv []string) (string, error) {
+		if len(argv) == 0 {
+			return "", nil
+		}
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		cmd.Dir = workdir
+		out, err := cmd.Output()
+		return string(out), err
+	}
+	dockerExecAsRoot = func(ctx context.Context, _ string, workdir string, _ docker.Envs, argv []string) (string, error) {
+		if len(argv) == 0 {
+			return "", nil
+		}
+		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+		cmd.Dir = workdir
+		out, err := cmd.Output()
+		return string(out), err
+	}
+	dockerCopyFromContainer = func(_ context.Context, _ string, srcInContainer, dstOnHost string) error {
+		return copyFile(srcInContainer, dstOnHost)
+	}
+	dockerCopyToContainerWithOwnership = func(_ context.Context, _ string, srcOnHost, dstInContainer string, _ bool) error {
+		return copyFileToDir(srcOnHost, dstInContainer)
+	}
+
+	resetContainer := func() error {
+		return os.WriteFile(containerFile, originalHost, 0o644)
+	}
+
+	var logBuf bytes.Buffer
+	s := &extractSync{
+		ctx:           ctx,
+		containerName: "fake-container",
+		workdir:       containerDir,
+		localRepo:     hostDir,
+		logOut:        &logBuf,
+		errOut:        &logBuf,
+		events:        make(chan watcherEvent, 1),
+		retryQueue:    make(map[string]retryEntry),
+		fileSyncIdle:  make(chan struct{}),
+		gitSyncer:     fakeGitSyncer{sync: resetContainer},
+	}
+	close(s.fileSyncIdle)
+
+	if err := s.performGitSync(); err != nil {
+		t.Fatalf("performGitSync failed: %v", err)
+	}
+
+	hostOut, err := os.ReadFile(hostFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	containerOut, err := os.ReadFile(containerFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(hostOut) != "container" {
+		t.Fatalf("host file not auto-synced, got %q", string(hostOut))
+	}
+	if string(containerOut) != "container" {
+		t.Fatalf("container file not restored after git sync, got %q", string(containerOut))
 	}
 }
 
@@ -654,6 +768,7 @@ func TestParseInotifyLineMalformed(t *testing.T) {
 		{"absolute path", "/absolute/path|CREATE", true, "/absolute/path"},
 		{"no pipe", "no-pipe-here", false, ""},
 		{"path with spaces", "/path/with spaces|MODIFY", true, "/path/with spaces"},
+		{"path with pipe", "/path/with|pipe/file.txt|MODIFY", true, "/path/with|pipe/file.txt"},
 		{"dot with pipe", "./|DELETE", true, "."},
 		{"just slash", "/|CREATE", true, "/"},
 		{"deep path", "/var/www/discourse/app/models/user.rb|MODIFY", true, "/var/www/discourse/app/models/user.rb"},
@@ -765,6 +880,23 @@ func TestShouldIgnoreRelative(t *testing.T) {
 				t.Errorf("shouldIgnoreRelative(%q) = %v, want %v", tt.path, got, tt.ignore)
 			}
 		})
+	}
+}
+
+func TestRelativeFromContainerBoundary(t *testing.T) {
+	s := &extractSync{workdir: "/work"}
+	rel, ok := s.relativeFromContainer("/work/file.txt")
+	if !ok || rel != "file.txt" {
+		t.Fatalf("expected /work/file.txt => file.txt, got ok=%v rel=%q", ok, rel)
+	}
+	if _, ok := s.relativeFromContainer("/workdir/file.txt"); ok {
+		t.Fatal("expected /workdir/file.txt to be outside /work")
+	}
+
+	root := &extractSync{workdir: "/"}
+	rel, ok = root.relativeFromContainer("/etc/hosts")
+	if !ok || rel != "etc/hosts" {
+		t.Fatalf("expected /etc/hosts => etc/hosts, got ok=%v rel=%q", ok, rel)
 	}
 }
 
@@ -897,6 +1029,47 @@ func TestDrainEventQueue(t *testing.T) {
 	if !strings.Contains(logBuf.String(), "cleared 2 stale retry entries") {
 		t.Errorf("expected retry clear log message, got: %s", logBuf.String())
 	}
+}
+
+type fakeGitSyncer struct {
+	sync func() error
+}
+
+func (f fakeGitSyncer) syncToContainer() error {
+	if f.sync == nil {
+		return nil
+	}
+	return f.sync()
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func copyFileToDir(src, dstDir string) error {
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return err
+	}
+	dst := filepath.Join(dstDir, filepath.Base(src))
+	return copyFile(src, dst)
 }
 
 // TestDrainEventQueueEmpty tests drainEventQueue with no pending events.

@@ -33,6 +33,10 @@ type syncOptions struct {
 	debug            bool
 }
 
+type gitSyncerIface interface {
+	syncToContainer() error
+}
+
 type changeSource int
 
 const (
@@ -84,18 +88,24 @@ type extractSync struct {
 	retryQueue    map[string]retryEntry
 
 	// Git sync integration
-	gitSyncer      *gitSyncer
+	gitSyncer      gitSyncerIface
 	gitEvents      chan struct{}
-	fileSyncPaused bool
+	fileSyncPaused atomic.Bool
 	fileSyncIdle   chan struct{} // Closed when file sync is idle
 	fileSyncIdleMu sync.Mutex    // Protects fileSyncIdle channel
 	gitSyncPending int32         // Atomic flag: 1 if git sync is pending, 0 otherwise
+	retryQueueMu   sync.Mutex    // Protects retryQueue
 }
 
 var errSyncSkipped = errors.New("sync skipped")
 var errTransient = errors.New("transient error")
 
 const maxRetryAttempts = 3
+
+var dockerExecOutput = docker.ExecOutputContext
+var dockerExecAsRoot = docker.ExecAsRootContext
+var dockerCopyFromContainer = docker.CopyFromContainerContext
+var dockerCopyToContainerWithOwnership = docker.CopyToContainerWithOwnershipContext
 
 func isTransientError(err error) bool {
 	if err == nil {
@@ -353,7 +363,7 @@ func (s *extractSync) processEvents() error {
 		}
 
 		// Merge retry queue into paths to process
-		for path, entry := range s.retryQueue {
+		for path, entry := range s.retrySnapshot() {
 			if entry.source == sourceHost {
 				hostPaths[path] = struct{}{}
 			} else {
@@ -371,17 +381,20 @@ func (s *extractSync) processEvents() error {
 			return nil
 		}
 
+		flushCtx, flushCancel := context.WithCancel(s.ctx)
+		defer flushCancel()
+
 		flushDone := make(chan error, 1)
 		go func() {
 			var err error
 			if len(hostToProcess) > 0 {
-				if err = s.processHostChanges(hostToProcess); err != nil {
+				if err = s.processHostChanges(flushCtx, hostToProcess); err != nil {
 					flushDone <- err
 					return
 				}
 			}
 			if len(containerToProcess) > 0 {
-				if err = s.processContainerChanges(containerToProcess); err != nil {
+				if err = s.processContainerChanges(flushCtx, containerToProcess); err != nil {
 					flushDone <- err
 					return
 				}
@@ -396,29 +409,39 @@ func (s *extractSync) processEvents() error {
 		timeoutTimer := time.NewTimer(timeout)
 		defer timeoutTimer.Stop()
 
+		waitForFlush := func(reason string) {
+			select {
+			case <-flushDone:
+			case <-time.After(2 * time.Second):
+				s.debugf("flush did not stop after %s", reason)
+			}
+		}
+
 		for {
 			select {
 			case err := <-flushDone:
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil
+				}
 				return err
 			case <-s.ctx.Done():
 				// Context cancelled while flushing - wait briefly for clean exit
-				select {
-				case <-flushDone:
-				case <-time.After(2 * time.Second):
-					s.debugf("flush interrupted by context cancellation")
-				}
+				flushCancel()
+				waitForFlush("context cancellation")
 				return nil
 			case <-gitCheckTicker.C:
 				// Check if git sync became pending - if so, abort flush early
 				// Git operations take priority since file events may be stale
 				if atomic.LoadInt32(&s.gitSyncPending) == 1 {
 					s.debugf("flush aborted: git sync pending (flush taking too long)")
+					flushCancel()
+					waitForFlush("git sync pending")
 					return nil
 				}
 			case <-timeoutTimer.C:
 				s.debugf("flush timed out after %v - possible docker hang", timeout)
-				// Don't return error - just log and continue. The goroutine will
-				// eventually complete or be abandoned.
+				flushCancel()
+				waitForFlush("timeout")
 				return nil
 			}
 		}
@@ -478,7 +501,7 @@ func (s *extractSync) processEvents() error {
 		case <-timer.C:
 			timerActive = false
 			// Skip file sync if paused for git sync
-			if s.fileSyncPaused {
+			if s.fileSyncPaused.Load() {
 				s.debugf("file sync paused, skipping flush")
 				continue
 			}
@@ -500,9 +523,12 @@ func (s *extractSync) processEvents() error {
 	}
 }
 
-func (s *extractSync) processHostChanges(paths []string) error {
+func (s *extractSync) processHostChanges(ctx context.Context, paths []string) error {
 	if len(paths) == 0 {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	// Check if git sync became pending while we were queued
 	if atomic.LoadInt32(&s.gitSyncPending) == 1 {
@@ -512,7 +538,7 @@ func (s *extractSync) processHostChanges(paths []string) error {
 	s.debugf("host events: %s", strings.Join(paths, ", "))
 
 	// Ask git about these paths - it will filter out gitignored files
-	entries, err := gitStatusPorcelainHost(s.localRepo, paths)
+	entries, err := gitStatusPorcelainHost(ctx, s.localRepo, paths)
 	if err != nil {
 		return err
 	}
@@ -522,6 +548,9 @@ func (s *extractSync) processHostChanges(paths []string) error {
 
 	changes := buildTrackedChanges(entries)
 	for i, change := range changes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Check mid-batch if git sync needs priority
 		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
 			s.debugf("git sync pending, aborting host changes mid-batch (%d/%d processed)", i, len(changes))
@@ -537,19 +566,19 @@ func (s *extractSync) processHostChanges(paths []string) error {
 			if shouldIgnoreRelative(change.oldPath) {
 				continue
 			}
-			if err := s.removeInContainer(change.oldPath); err != nil {
+			if err := s.removeInContainer(ctx, change.oldPath); err != nil {
 				return err
 			}
 			fmt.Fprintf(s.logOut, "host → container: removed %s\n", change.oldPath)
 		}
 		switch change.kind {
 		case changeDelete:
-			if err := s.removeInContainer(change.path); err != nil {
+			if err := s.removeInContainer(ctx, change.path); err != nil {
 				return err
 			}
 			fmt.Fprintf(s.logOut, "host → container: removed %s\n", change.path)
 		case changeModify, changeRename:
-			same, err := s.hashesMatch(change.path)
+			same, err := s.hashesMatch(ctx, change.path)
 			if err != nil {
 				if errors.Is(err, errTransient) {
 					s.queueRetry(change.path, sourceHost)
@@ -559,13 +588,13 @@ func (s *extractSync) processHostChanges(paths []string) error {
 			}
 			if same {
 				s.debugf("host path %s already synchronized", change.path)
-				delete(s.retryQueue, change.path)
+				s.deleteRetry(change.path)
 				continue
 			}
-			if err := s.copyHostToContainer(change.path); err != nil {
+			if err := s.copyHostToContainer(ctx, change.path); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping host → container copy for %s (file vanished)", change.path)
-					delete(s.retryQueue, change.path)
+					s.deleteRetry(change.path)
 					continue
 				}
 				if errors.Is(err, errTransient) {
@@ -574,13 +603,16 @@ func (s *extractSync) processHostChanges(paths []string) error {
 				}
 				return err
 			}
-			delete(s.retryQueue, change.path)
+			s.deleteRetry(change.path)
 			fmt.Fprintf(s.logOut, "host → container: updated %s\n", change.path)
 		}
 	}
 
 	// For paths the watcher reported but git didn't, check if they need sync
 	for i, rel := range paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Check mid-batch if git sync needs priority
 		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
 			s.debugf("git sync pending, aborting host path check mid-batch (%d/%d processed)", i, len(paths))
@@ -600,16 +632,16 @@ func (s *extractSync) processHostChanges(paths []string) error {
 			// File was deleted on host, remove from container if it exists there
 			// This handles both tracked and untracked file deletions
 			checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
-			out, _ := docker.ExecOutput(s.containerName, s.workdir, nil, checkCmd)
+			out, _ := dockerExecOutput(ctx, s.containerName, s.workdir, nil, checkCmd)
 			if strings.Contains(out, "exists") {
 				// Check if file is gitignored - don't sync gitignored files
-				ignored, _ := s.isGitIgnored(s.localRepo, rel)
+				ignored, _ := s.isGitIgnored(ctx, s.localRepo, rel)
 				if ignored {
 					s.debugf("skipping deletion of %s (gitignored)", rel)
 					continue
 				}
 
-				if err := s.removeInContainer(rel); err != nil {
+				if err := s.removeInContainer(ctx, rel); err != nil {
 					s.debugf("remove failed for %s: %v", rel, err)
 					continue
 				}
@@ -619,7 +651,7 @@ func (s *extractSync) processHostChanges(paths []string) error {
 		}
 
 		// File exists, check if this file is tracked by git (not gitignored)
-		tracked, err := s.isTrackedByGit(s.localRepo, rel)
+		tracked, err := s.isTrackedByGit(ctx, s.localRepo, rel)
 		if err != nil || !tracked {
 			s.debugf("skipping %s (not tracked by git)", rel)
 			continue
@@ -627,7 +659,7 @@ func (s *extractSync) processHostChanges(paths []string) error {
 
 		// File is tracked but git status didn't report it (it's clean)
 		// Check if it actually differs from container (e.g., after git reset)
-		same, err := s.hashesMatch(rel)
+		same, err := s.hashesMatch(ctx, rel)
 		if err != nil {
 			if errors.Is(err, errTransient) {
 				s.queueRetry(rel, sourceHost)
@@ -637,10 +669,10 @@ func (s *extractSync) processHostChanges(paths []string) error {
 			continue
 		}
 		if !same {
-			if err := s.copyHostToContainer(rel); err != nil {
+			if err := s.copyHostToContainer(ctx, rel); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping host → container copy for %s (file vanished)", rel)
-					delete(s.retryQueue, rel)
+					s.deleteRetry(rel)
 					continue
 				}
 				if errors.Is(err, errTransient) {
@@ -650,20 +682,23 @@ func (s *extractSync) processHostChanges(paths []string) error {
 				s.debugf("copy failed for %s: %v", rel, err)
 				continue
 			}
-			delete(s.retryQueue, rel)
+			s.deleteRetry(rel)
 			fmt.Fprintf(s.logOut, "host → container: updated %s\n", rel)
 		} else {
 			s.debugf("host path %s already synchronized", rel)
-			delete(s.retryQueue, rel)
+			s.deleteRetry(rel)
 		}
 	}
 
 	return nil
 }
 
-func (s *extractSync) processContainerChanges(paths []string) error {
+func (s *extractSync) processContainerChanges(ctx context.Context, paths []string) error {
 	if len(paths) == 0 {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	// Check if git sync became pending while we were queued
 	if atomic.LoadInt32(&s.gitSyncPending) == 1 {
@@ -673,7 +708,7 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 	s.debugf("container events: %s", strings.Join(paths, ", "))
 
 	// Ask git about these paths - it will filter out gitignored files
-	entries, err := gitStatusPorcelainContainer(s.containerName, s.workdir, paths)
+	entries, err := gitStatusPorcelainContainer(ctx, s.containerName, s.workdir, paths)
 	if err != nil {
 		return err
 	}
@@ -683,6 +718,9 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 
 	changes := buildTrackedChanges(entries)
 	for i, change := range changes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Check mid-batch if git sync needs priority
 		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
 			s.debugf("git sync pending, aborting container changes mid-batch (%d/%d processed)", i, len(changes))
@@ -710,7 +748,7 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 			}
 			fmt.Fprintf(s.logOut, "container → host: removed %s\n", change.path)
 		case changeModify, changeRename:
-			same, err := s.hashesMatch(change.path)
+			same, err := s.hashesMatch(ctx, change.path)
 			if err != nil {
 				if errors.Is(err, errTransient) {
 					s.queueRetry(change.path, sourceContainer)
@@ -720,13 +758,13 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 			}
 			if same {
 				s.debugf("container path %s already synchronized", change.path)
-				delete(s.retryQueue, change.path)
+				s.deleteRetry(change.path)
 				continue
 			}
-			if err := s.copyContainerToHost(change.path); err != nil {
+			if err := s.copyContainerToHost(ctx, change.path); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping container → host copy for %s (file vanished)", change.path)
-					delete(s.retryQueue, change.path)
+					s.deleteRetry(change.path)
 					continue
 				}
 				if errors.Is(err, errTransient) {
@@ -735,13 +773,16 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 				}
 				return err
 			}
-			delete(s.retryQueue, change.path)
+			s.deleteRetry(change.path)
 			fmt.Fprintf(s.logOut, "container → host: updated %s\n", change.path)
 		}
 	}
 
 	// For paths the watcher reported but git didn't, check if they need sync
 	for i, rel := range paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Check mid-batch if git sync needs priority
 		if atomic.LoadInt32(&s.gitSyncPending) == 1 {
 			s.debugf("git sync pending, aborting container path check mid-batch (%d/%d processed)", i, len(paths))
@@ -754,7 +795,7 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 
 		// Check if file exists in container
 		checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
-		out, _ := docker.ExecOutput(s.containerName, s.workdir, nil, checkCmd)
+		out, _ := dockerExecOutput(ctx, s.containerName, s.workdir, nil, checkCmd)
 		containerExists := strings.Contains(out, "exists")
 
 		if !containerExists {
@@ -763,7 +804,7 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 			hostPath := filepath.Join(s.localRepo, filepath.FromSlash(rel))
 			if _, err := os.Stat(hostPath); err == nil {
 				// Check if file is gitignored - don't sync gitignored files
-				ignored, _ := s.isGitIgnoredInContainer(rel)
+				ignored, _ := s.isGitIgnoredInContainer(ctx, rel)
 				if ignored {
 					s.debugf("skipping deletion of %s (gitignored in container)", rel)
 					continue
@@ -779,7 +820,7 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 		}
 
 		// File exists, check if this file is tracked by git in container (not gitignored)
-		tracked, err := s.isTrackedByGitInContainer(rel)
+		tracked, err := s.isTrackedByGitInContainer(ctx, rel)
 		if err != nil || !tracked {
 			s.debugf("skipping %s (not tracked by git in container)", rel)
 			continue
@@ -787,7 +828,7 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 
 		// File is tracked but git status didn't report it (it's clean)
 		// Check if it actually differs from host (e.g., after git reset)
-		same, err := s.hashesMatch(rel)
+		same, err := s.hashesMatch(ctx, rel)
 		if err != nil {
 			if errors.Is(err, errTransient) {
 				s.queueRetry(rel, sourceContainer)
@@ -797,10 +838,10 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 			continue
 		}
 		if !same {
-			if err := s.copyContainerToHost(rel); err != nil {
+			if err := s.copyContainerToHost(ctx, rel); err != nil {
 				if errors.Is(err, errSyncSkipped) {
 					s.debugf("skipping container → host copy for %s (file vanished)", rel)
-					delete(s.retryQueue, rel)
+					s.deleteRetry(rel)
 					continue
 				}
 				if errors.Is(err, errTransient) {
@@ -810,11 +851,11 @@ func (s *extractSync) processContainerChanges(paths []string) error {
 				s.debugf("copy failed for %s: %v", rel, err)
 				continue
 			}
-			delete(s.retryQueue, rel)
+			s.deleteRetry(rel)
 			fmt.Fprintf(s.logOut, "container → host: updated %s\n", rel)
 		} else {
 			s.debugf("container path %s already synchronized", rel)
-			delete(s.retryQueue, rel)
+			s.deleteRetry(rel)
 		}
 	}
 
@@ -930,13 +971,25 @@ func (s *extractSync) performGitSync() error {
 	s.debugf("performGitSync: file sync is idle, pausing")
 
 	// Pause file sync during git operations
-	s.fileSyncPaused = true
+	s.fileSyncPaused.Store(true)
 	defer func() {
-		s.fileSyncPaused = false
+		s.fileSyncPaused.Store(false)
 		// Clear the pending flag - git sync is complete
 		atomic.StoreInt32(&s.gitSyncPending, 0)
 		s.debugf("performGitSync: complete, file sync resumed")
 	}()
+
+	// Auto-sync container working tree changes to host before git sync.
+	containerChanges, err := s.collectContainerChanges(s.ctx)
+	if err != nil {
+		return err
+	}
+	if len(containerChanges) > 0 {
+		fmt.Fprintf(s.logOut, "git sync: container has %d uncommitted change(s), syncing to host\n", len(containerChanges))
+		if err := s.applyContainerChangesToHost(s.ctx, containerChanges); err != nil {
+			return err
+		}
+	}
 
 	// Drain queued file events - they're now stale since git state is changing.
 	// After git sync completes, the working trees will match and any real
@@ -944,7 +997,97 @@ func (s *extractSync) performGitSync() error {
 	s.drainEventQueue()
 
 	s.debugf("performGitSync: calling syncToContainer")
-	return s.gitSyncer.syncToContainer()
+	if err := s.gitSyncer.syncToContainer(); err != nil {
+		return err
+	}
+
+	// Reapply auto-synced changes after git sync resets container working tree.
+	if len(containerChanges) > 0 {
+		if err := s.applyHostChangesToContainer(s.ctx, containerChanges); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *extractSync) collectContainerChanges(ctx context.Context) ([]trackedChange, error) {
+	entries, err := gitStatusPorcelainContainer(ctx, s.containerName, s.workdir, nil)
+	if err != nil {
+		return nil, err
+	}
+	changes := buildTrackedChanges(entries)
+	if len(changes) == 0 {
+		return nil, nil
+	}
+	return changes, nil
+}
+
+func (s *extractSync) applyContainerChangesToHost(ctx context.Context, changes []trackedChange) error {
+	for _, change := range changes {
+		if change.kind == changeRename && change.oldPath != "" {
+			if shouldIgnoreRelative(change.oldPath) {
+				continue
+			}
+			if err := s.removeOnHost(change.oldPath); err != nil {
+				return err
+			}
+			fmt.Fprintf(s.logOut, "container → host: removed %s\n", change.oldPath)
+		}
+		switch change.kind {
+		case changeDelete:
+			if err := s.removeOnHost(change.path); err != nil {
+				return err
+			}
+			fmt.Fprintf(s.logOut, "container → host: removed %s\n", change.path)
+		case changeModify, changeRename:
+			same, err := s.hashesMatch(ctx, change.path)
+			if err != nil {
+				return err
+			}
+			if same {
+				continue
+			}
+			if err := s.copyContainerToHost(ctx, change.path); err != nil {
+				return err
+			}
+			fmt.Fprintf(s.logOut, "container → host: updated %s\n", change.path)
+		}
+	}
+	return nil
+}
+
+func (s *extractSync) applyHostChangesToContainer(ctx context.Context, changes []trackedChange) error {
+	for _, change := range changes {
+		if change.kind == changeRename && change.oldPath != "" {
+			if shouldIgnoreRelative(change.oldPath) {
+				continue
+			}
+			if err := s.removeInContainer(ctx, change.oldPath); err != nil {
+				return err
+			}
+			fmt.Fprintf(s.logOut, "host → container: removed %s\n", change.oldPath)
+		}
+		switch change.kind {
+		case changeDelete:
+			if err := s.removeInContainer(ctx, change.path); err != nil {
+				return err
+			}
+			fmt.Fprintf(s.logOut, "host → container: removed %s\n", change.path)
+		case changeModify, changeRename:
+			same, err := s.hashesMatch(ctx, change.path)
+			if err != nil {
+				return err
+			}
+			if same {
+				continue
+			}
+			if err := s.copyHostToContainer(ctx, change.path); err != nil {
+				return err
+			}
+			fmt.Fprintf(s.logOut, "host → container: updated %s\n", change.path)
+		}
+	}
+	return nil
 }
 
 // drainEventQueue discards all pending file events from the queue.
@@ -961,9 +1104,8 @@ func (s *extractSync) drainEventQueue() {
 				s.debugf("drained %d stale file events before git sync", drained)
 			}
 			// Also clear retry queue - those paths are stale too
-			if len(s.retryQueue) > 0 {
-				s.debugf("cleared %d stale retry entries before git sync", len(s.retryQueue))
-				s.retryQueue = make(map[string]retryEntry)
+			if cleared := s.clearRetryQueue(); cleared > 0 {
+				s.debugf("cleared %d stale retry entries before git sync", cleared)
 			}
 			return
 		}
@@ -1005,7 +1147,7 @@ func (s *extractSync) signalFileSyncIdle() {
 	s.fileSyncIdle = make(chan struct{})
 }
 
-func gitStatusPorcelainHost(repo string, paths []string) ([]statusEntry, error) {
+func gitStatusPorcelainHost(ctx context.Context, repo string, paths []string) ([]statusEntry, error) {
 	args := []string{"-c", "core.quotePath=false", "status", "--porcelain"}
 	if len(paths) > 0 {
 		args = append(args, "--")
@@ -1013,7 +1155,7 @@ func gitStatusPorcelainHost(repo string, paths []string) ([]statusEntry, error) 
 			args = append(args, filepath.FromSlash(p))
 		}
 	}
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repo
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1022,13 +1164,13 @@ func gitStatusPorcelainHost(repo string, paths []string) ([]statusEntry, error) 
 	return parseStatusOutput(string(out)), nil
 }
 
-func gitStatusPorcelainContainer(name, workdir string, paths []string) ([]statusEntry, error) {
+func gitStatusPorcelainContainer(ctx context.Context, name, workdir string, paths []string) ([]statusEntry, error) {
 	args := []string{"git", "-c", "core.quotePath=false", "status", "--porcelain"}
 	if len(paths) > 0 {
 		args = append(args, "--")
 		args = append(args, paths...)
 	}
-	out, err := docker.ExecOutput(name, workdir, nil, args)
+	out, err := dockerExecOutput(ctx, name, workdir, nil, args)
 	if err != nil {
 		return nil, fmt.Errorf("git status (container): %w: %s", err, strings.TrimSpace(out))
 	}
@@ -1088,19 +1230,19 @@ func buildTrackedChanges(entries []statusEntry) []trackedChange {
 	return out
 }
 
-func (s *extractSync) hashesMatch(rel string) (bool, error) {
-	hostHash, err := s.hostHash(rel)
+func (s *extractSync) hashesMatch(ctx context.Context, rel string) (bool, error) {
+	hostHash, err := s.hostHash(ctx, rel)
 	if err != nil {
 		return false, err
 	}
-	containerHash, err := s.containerHash(rel)
+	containerHash, err := s.containerHash(ctx, rel)
 	if err != nil {
 		return false, err
 	}
 	return hostHash != "" && hostHash == containerHash, nil
 }
 
-func (s *extractSync) hostHash(rel string) (string, error) {
+func (s *extractSync) hostHash(ctx context.Context, rel string) (string, error) {
 	abs := filepath.Join(s.localRepo, filepath.FromSlash(rel))
 	if _, err := os.Stat(abs); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1111,7 +1253,7 @@ func (s *extractSync) hostHash(rel string) (string, error) {
 		}
 		return "", err
 	}
-	cmd := exec.Command("git", "-C", s.localRepo, "hash-object", "--", filepath.FromSlash(rel))
+	cmd := exec.CommandContext(ctx, "git", "-C", s.localRepo, "hash-object", "--", filepath.FromSlash(rel))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -1127,10 +1269,10 @@ func (s *extractSync) hostHash(rel string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (s *extractSync) containerHash(rel string) (string, error) {
+func (s *extractSync) containerHash(ctx context.Context, rel string) (string, error) {
 	// First check if file exists in container
 	checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
-	out, _ := docker.ExecOutput(s.containerName, s.workdir, nil, checkCmd)
+	out, _ := dockerExecOutput(ctx, s.containerName, s.workdir, nil, checkCmd)
 	if !strings.Contains(out, "exists") {
 		// File doesn't exist in container
 		return "", nil
@@ -1138,7 +1280,7 @@ func (s *extractSync) containerHash(rel string) (string, error) {
 
 	// File exists, get its hash
 	args := []string{"git", "hash-object", "--", rel}
-	out, err := docker.ExecOutput(s.containerName, s.workdir, nil, args)
+	out, err := dockerExecOutput(ctx, s.containerName, s.workdir, nil, args)
 	if err != nil {
 		msg := strings.TrimSpace(out)
 		if strings.Contains(msg, "does not exist") || strings.Contains(msg, "No such file") {
@@ -1153,7 +1295,7 @@ func (s *extractSync) containerHash(rel string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-func (s *extractSync) copyHostToContainer(rel string) error {
+func (s *extractSync) copyHostToContainer(ctx context.Context, rel string) error {
 	hostPath := filepath.Join(s.localRepo, filepath.FromSlash(rel))
 	info, err := os.Stat(hostPath)
 	if err != nil {
@@ -1169,10 +1311,10 @@ func (s *extractSync) copyHostToContainer(rel string) error {
 	if destDir == s.workdir || destDir == "." || destDir == "" {
 		destDir = s.workdir
 	}
-	if err := s.ensureContainerDir(path.Dir(rel)); err != nil {
+	if err := s.ensureContainerDir(ctx, path.Dir(rel)); err != nil {
 		return err
 	}
-	if err := docker.CopyToContainerWithOwnership(s.containerName, hostPath, destDir, false); err != nil {
+	if err := dockerCopyToContainerWithOwnership(ctx, s.containerName, hostPath, destDir, false); err != nil {
 		// The file may have vanished between the initial stat and docker reading it.
 		if _, statErr := os.Stat(hostPath); errors.Is(statErr, os.ErrNotExist) {
 			return errSyncSkipped
@@ -1181,22 +1323,22 @@ func (s *extractSync) copyHostToContainer(rel string) error {
 	}
 	// Ensure the discourse user retains write permissions
 	mode := fmt.Sprintf("%04o", info.Mode().Perm())
-	if _, err := docker.ExecAsRoot(s.containerName, s.workdir, nil, []string{"chmod", mode, rel}); err != nil {
+	if _, err := dockerExecAsRoot(ctx, s.containerName, s.workdir, nil, []string{"chmod", mode, rel}); err != nil {
 		return fmt.Errorf("container chmod %s: %w", rel, err)
 	}
 	return nil
 }
 
-func (s *extractSync) copyContainerToHost(rel string) error {
+func (s *extractSync) copyContainerToHost(ctx context.Context, rel string) error {
 	hostPath := filepath.Join(s.localRepo, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
 		return err
 	}
 	containerPath := path.Join(s.workdir, rel)
-	if err := docker.CopyFromContainer(s.containerName, containerPath, hostPath); err != nil {
+	if err := dockerCopyFromContainer(ctx, s.containerName, containerPath, hostPath); err != nil {
 		// The file may have vanished between event delivery and copying.
 		checkCmd := []string{"bash", "-lc", fmt.Sprintf("test -e %s && echo exists", shellQuote(rel))}
-		out, _ := docker.ExecOutput(s.containerName, s.workdir, nil, checkCmd)
+		out, _ := dockerExecOutput(ctx, s.containerName, s.workdir, nil, checkCmd)
 		if !strings.Contains(out, "exists") {
 			return errSyncSkipped
 		}
@@ -1205,9 +1347,9 @@ func (s *extractSync) copyContainerToHost(rel string) error {
 	return nil
 }
 
-func (s *extractSync) removeInContainer(rel string) error {
+func (s *extractSync) removeInContainer(ctx context.Context, rel string) error {
 	cmd := []string{"bash", "-lc", "rm -rf -- " + shellQuote(rel)}
-	if _, err := docker.ExecOutput(s.containerName, s.workdir, nil, cmd); err != nil {
+	if _, err := dockerExecOutput(ctx, s.containerName, s.workdir, nil, cmd); err != nil {
 		return fmt.Errorf("container remove %s: %w", rel, err)
 	}
 	return nil
@@ -1229,13 +1371,13 @@ func (s *extractSync) removeOnHost(rel string) error {
 	return nil
 }
 
-func (s *extractSync) ensureContainerDir(rel string) error {
+func (s *extractSync) ensureContainerDir(ctx context.Context, rel string) error {
 	dir := rel
 	if dir == "." || dir == "" {
 		return nil
 	}
 	cmd := []string{"bash", "-lc", "mkdir -p " + shellQuote(rel)}
-	if _, err := docker.ExecOutput(s.containerName, s.workdir, nil, cmd); err != nil {
+	if _, err := dockerExecOutput(ctx, s.containerName, s.workdir, nil, cmd); err != nil {
 		return fmt.Errorf("container mkdir %s: %w", rel, err)
 	}
 	return nil
@@ -1274,7 +1416,11 @@ func (s *extractSync) relativeFromContainer(abs string) (string, bool) {
 	}
 	clean := path.Clean(abs)
 	work := path.Clean(s.workdir)
-	if !strings.HasPrefix(clean, work) {
+	if work == "/" {
+		rel := strings.TrimPrefix(clean, "/")
+		return rel, true
+	}
+	if clean != work && !strings.HasPrefix(clean, work+"/") {
 		return "", false
 	}
 	rel := strings.TrimPrefix(clean, work)
@@ -1283,7 +1429,7 @@ func (s *extractSync) relativeFromContainer(abs string) (string, bool) {
 }
 
 func (s *extractSync) ensureInotify() error {
-	out, err := docker.ExecOutput(s.containerName, s.workdir, nil, []string{"bash", "-lc", "command -v inotifywait"})
+	out, err := dockerExecOutput(s.ctx, s.containerName, s.workdir, nil, []string{"bash", "-lc", "command -v inotifywait"})
 	trimmed := strings.TrimSpace(out)
 	if err != nil {
 		if trimmed == "" {
@@ -1312,21 +1458,48 @@ func (s *extractSync) debugf(format string, args ...interface{}) {
 	fmt.Fprintf(s.logOut, "[debug] "+format+"\n", args...)
 }
 
+func (s *extractSync) retrySnapshot() map[string]retryEntry {
+	s.retryQueueMu.Lock()
+	defer s.retryQueueMu.Unlock()
+	snapshot := make(map[string]retryEntry, len(s.retryQueue))
+	for path, entry := range s.retryQueue {
+		snapshot[path] = entry
+	}
+	return snapshot
+}
+
+func (s *extractSync) deleteRetry(path string) {
+	s.retryQueueMu.Lock()
+	defer s.retryQueueMu.Unlock()
+	delete(s.retryQueue, path)
+}
+
+func (s *extractSync) clearRetryQueue() int {
+	s.retryQueueMu.Lock()
+	defer s.retryQueueMu.Unlock()
+	count := len(s.retryQueue)
+	s.retryQueue = make(map[string]retryEntry)
+	return count
+}
+
 func (s *extractSync) queueRetry(path string, source changeSource) {
+	s.retryQueueMu.Lock()
 	entry := s.retryQueue[path]
 	entry.source = source
 	entry.attempts++
 	if entry.attempts >= maxRetryAttempts {
 		fmt.Fprintf(s.errOut, "warning: giving up on %s after %d attempts\n", path, entry.attempts)
 		delete(s.retryQueue, path)
+		s.retryQueueMu.Unlock()
 		return
 	}
 	fmt.Fprintf(s.errOut, "warning: %s failed, will retry (attempt %d/%d)\n", path, entry.attempts, maxRetryAttempts)
 	s.retryQueue[path] = entry
+	s.retryQueueMu.Unlock()
 }
 
-func (s *extractSync) isGitIgnored(repoDir, relPath string) (bool, error) {
-	cmd := exec.Command("git", "check-ignore", "-q", filepath.FromSlash(relPath))
+func (s *extractSync) isGitIgnored(ctx context.Context, repoDir, relPath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "check-ignore", "-q", filepath.FromSlash(relPath))
 	cmd.Dir = repoDir
 	if err := cmd.Run(); err == nil {
 		// Exit code 0 means file IS ignored
@@ -1335,8 +1508,8 @@ func (s *extractSync) isGitIgnored(repoDir, relPath string) (bool, error) {
 	return false, nil
 }
 
-func (s *extractSync) isGitIgnoredInContainer(relPath string) (bool, error) {
-	_, err := docker.ExecOutput(s.containerName, s.workdir, nil, []string{"git", "check-ignore", "-q", relPath})
+func (s *extractSync) isGitIgnoredInContainer(ctx context.Context, relPath string) (bool, error) {
+	_, err := dockerExecOutput(ctx, s.containerName, s.workdir, nil, []string{"git", "check-ignore", "-q", relPath})
 	if err == nil {
 		// Exit code 0 means file IS ignored
 		return true, nil
@@ -1344,15 +1517,15 @@ func (s *extractSync) isGitIgnoredInContainer(relPath string) (bool, error) {
 	return false, nil
 }
 
-func (s *extractSync) isTrackedByGit(repoDir, relPath string) (bool, error) {
+func (s *extractSync) isTrackedByGit(ctx context.Context, repoDir, relPath string) (bool, error) {
 	// First check if file is ignored by .gitignore
-	ignored, _ := s.isGitIgnored(repoDir, relPath)
+	ignored, _ := s.isGitIgnored(ctx, repoDir, relPath)
 	if ignored {
 		return false, nil
 	}
 
 	// Not ignored, check if file is tracked
-	cmd := exec.Command("git", "ls-files", "--", filepath.FromSlash(relPath))
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--", filepath.FromSlash(relPath))
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -1361,15 +1534,15 @@ func (s *extractSync) isTrackedByGit(repoDir, relPath string) (bool, error) {
 	return strings.TrimSpace(string(out)) != "", nil
 }
 
-func (s *extractSync) isTrackedByGitInContainer(relPath string) (bool, error) {
+func (s *extractSync) isTrackedByGitInContainer(ctx context.Context, relPath string) (bool, error) {
 	// First check if file is ignored by .gitignore
-	ignored, _ := s.isGitIgnoredInContainer(relPath)
+	ignored, _ := s.isGitIgnoredInContainer(ctx, relPath)
 	if ignored {
 		return false, nil
 	}
 
 	// Not ignored, check if file is tracked
-	out, err := docker.ExecOutput(s.containerName, s.workdir, nil, []string{"git", "ls-files", "--", relPath})
+	out, err := dockerExecOutput(ctx, s.containerName, s.workdir, nil, []string{"git", "ls-files", "--", relPath})
 	if err != nil {
 		return false, nil // Not tracked or error
 	}
@@ -1394,9 +1567,8 @@ func mapKeys(m map[string]struct{}) []string {
 }
 
 func parseInotifyLine(line string) (string, bool) {
-	if strings.Contains(line, "|") {
-		parts := strings.SplitN(line, "|", 2)
-		abs := strings.TrimSpace(parts[0])
+	if idx := strings.LastIndex(line, "|"); idx != -1 {
+		abs := strings.TrimSpace(line[:idx])
 		if abs == "" {
 			return "", false
 		}
