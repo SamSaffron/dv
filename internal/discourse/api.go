@@ -165,6 +165,7 @@ func (c *Client) generateKey() error {
 	c.verboseLog("Generating new API key via Rails...")
 
 	// Ruby script to create or find existing API key
+	// Uses DV_API_KEY: and DV_USERNAME: markers to be robust against warnings/noise in stdout
 	rubyScript := fmt.Sprintf(`
 require "json"
 ActiveRecord::Base.logger = nil
@@ -185,43 +186,34 @@ key = ApiKey.create!(
 )
 
 STDOUT.sync = true
-puts key.key
-puts admin.username
+puts "DV_API_KEY:#{key.key}"
+puts "DV_USERNAME:#{admin.username}"
 `, APIKeyDescription)
 
 	cmd := fmt.Sprintf("cd %s && RAILS_ENV=development bundle exec rails runner - <<'RUBY'\n%s\nRUBY",
 		shellQuote(c.Workdir), rubyScript)
 
-	out, err := docker.ExecOutput(c.ContainerName, c.Workdir, c.Envs, []string{"bash", "-lc", cmd})
+	out, err := docker.ExecCombinedOutput(c.ContainerName, c.Workdir, c.Envs, []string{"bash", "-lc", cmd})
+	c.verboseLog("Rails runner output (%d bytes, markers: key=%t, user=%t)", len(out), strings.Contains(out, "DV_API_KEY:"), strings.Contains(out, "DV_USERNAME:"))
 	if err != nil {
 		return fmt.Errorf("rails runner failed: %w\nOutput: %s", err, out)
 	}
 
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) < 2 {
-		return fmt.Errorf("unexpected rails output: %s", out)
+	// Parse output looking for DV_API_KEY: and DV_USERNAME: markers
+	// This is robust against warnings/noise that plugins may emit during Rails init
+	var keyLine, userLine string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "DV_API_KEY:") {
+			keyLine = strings.TrimPrefix(line, "DV_API_KEY:")
+		} else if strings.HasPrefix(line, "DV_USERNAME:") {
+			userLine = strings.TrimPrefix(line, "DV_USERNAME:")
+		}
 	}
 
-	// Get the last two non-empty lines (in case of warnings before)
-	var keyLine, userLine string
-	for i := len(lines) - 1; i >= 0 && (keyLine == "" || userLine == ""); i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-		if keyLine == "" {
-			userLine = line
-		} else {
-			keyLine = line
-		}
-		if userLine != "" && keyLine == "" {
-			keyLine = userLine
-			userLine = ""
-		}
+	if keyLine == "" || userLine == "" {
+		return fmt.Errorf("missing DV_API_KEY or DV_USERNAME markers in output (stderr/warnings may have caused issues): %q", out)
 	}
-	// Re-extract properly: second-to-last is key, last is username
-	keyLine = strings.TrimSpace(lines[len(lines)-2])
-	userLine = strings.TrimSpace(lines[len(lines)-1])
 
 	// Validate key format (should be hex, 32-64 chars)
 	keyRe := regexp.MustCompile(`^[0-9a-f]{32,64}$`)

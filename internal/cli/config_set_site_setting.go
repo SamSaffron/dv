@@ -5,8 +5,9 @@ import (
 	"dv/internal/discourse"
 	"dv/internal/xdg"
 	"fmt"
-	"github.com/spf13/cobra"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 var setSiteSettingCommand = &cobra.Command{
@@ -38,7 +39,7 @@ var setSiteSettingCommand = &cobra.Command{
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Setting site setting '%s' to '%s'...\n", setting, value)
 
-		client, err := discourse.NewClientWrapper(containerName, cfg, false)
+		client, err := discourse.NewClientWrapper(containerName, cfg, collectEnvPassthrough(cfg), false)
 		if err != nil {
 			return fmt.Errorf("create discourse client: %w", err)
 		}

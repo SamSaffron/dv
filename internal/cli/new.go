@@ -387,6 +387,7 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 			discourseRoot: workdir,
 			dataDir:       dataDir,
 			verbose:       verbose || isTruthyEnv("DV_VERBOSE"),
+			envs:          envList,
 		}
 		if err = handleThemeClone(cmd, ctx, t.Repo, t.Name); err != nil {
 			return fmt.Errorf("failed to install theme %s: %w", t.Repo, err)

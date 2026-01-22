@@ -463,6 +463,7 @@ type Envs []string
 
 // ExecOutput runs a command inside the container as the discourse user.
 // Use nil for envs when no environment variables are needed.
+// Returns stdout only; use ExecCombinedOutput if you need stderr too.
 func ExecOutput(name, workdir string, envs Envs, argv []string) (string, error) {
 	args := []string{"exec", "--user", "discourse", "-w", workdir}
 	for _, e := range envs {
@@ -475,8 +476,24 @@ func ExecOutput(name, workdir string, envs Envs, argv []string) (string, error) 
 	return string(out), err
 }
 
+// ExecCombinedOutput runs a command inside the container as the discourse user.
+// Use nil for envs when no environment variables are needed.
+// Returns both stdout and stderr combined.
+func ExecCombinedOutput(name, workdir string, envs Envs, argv []string) (string, error) {
+	args := []string{"exec", "--user", "discourse", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // ExecAsRoot runs a command inside the container as root, returning output.
 // Use nil for envs when no environment variables are needed.
+// Returns stdout only; use ExecAsRootCombined if you need stderr too.
 func ExecAsRoot(name, workdir string, envs Envs, argv []string) (string, error) {
 	args := []string{"exec", "--user", "root", "-w", workdir}
 	for _, e := range envs {
@@ -486,6 +503,21 @@ func ExecAsRoot(name, workdir string, envs Envs, argv []string) (string, error) 
 	args = append(args, argv...)
 	cmd := exec.Command("docker", args...)
 	out, err := cmd.Output()
+	return string(out), err
+}
+
+// ExecAsRootCombined runs a command inside the container as root.
+// Use nil for envs when no environment variables are needed.
+// Returns both stdout and stderr combined.
+func ExecAsRootCombined(name, workdir string, envs Envs, argv []string) (string, error) {
+	args := []string{"exec", "--user", "root", "-w", workdir}
+	for _, e := range envs {
+		args = append(args, "-e", e)
+	}
+	args = append(args, name)
+	args = append(args, argv...)
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 

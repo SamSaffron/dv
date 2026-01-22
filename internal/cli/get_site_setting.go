@@ -5,8 +5,9 @@ import (
 	"dv/internal/discourse"
 	"dv/internal/xdg"
 	"fmt"
-	"github.com/spf13/cobra"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 var getSiteSettingCommand = &cobra.Command{
@@ -35,7 +36,7 @@ var getSiteSettingCommand = &cobra.Command{
 			return fmt.Errorf("no container selected; run 'dv start' or pass --container")
 		}
 
-		client, err := discourse.NewClientWrapper(containerName, cfg, false)
+		client, err := discourse.NewClientWrapper(containerName, cfg, collectEnvPassthrough(cfg), false)
 		if err != nil {
 			return fmt.Errorf("create discourse client: %w", err)
 		}

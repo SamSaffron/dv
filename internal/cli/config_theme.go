@@ -34,6 +34,7 @@ type themeCommandContext struct {
 	discourseRoot string
 	dataDir       string
 	verbose       bool
+	envs          docker.Envs
 }
 
 func (ctx themeCommandContext) hostMirrorPath(slug string) string {
@@ -121,6 +122,7 @@ theme root so AI tooling understands the layout.`,
 			discourseRoot: discourseRoot,
 			dataDir:       dataDir,
 			verbose:       verboseFlag,
+			envs:          collectEnvPassthrough(cfg),
 		}
 
 		themeNameFlag, _ := cmd.Flags().GetString("theme-name")
@@ -641,7 +643,7 @@ func ensureThemeAPIKey(cmd *cobra.Command, ctx themeCommandContext, slug string)
 		ctx.discourseRoot,
 		description,
 		keyPath,
-		collectEnvPassthrough(*ctx.cfg),
+		ctx.envs,
 		ctx.verbose,
 	)
 	if err != nil {

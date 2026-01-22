@@ -52,6 +52,7 @@ func GenerateAPIKey(opts GenerateAPIKeyOptions) (*GeneratedKey, error) {
 	verboseLog("Generating API key with description: %s", opts.Description)
 
 	// Ruby script to create or find existing API key
+	// Uses DV_API_KEY: and DV_USERNAME: markers to be robust against warnings/noise in stdout
 	rubyScript := fmt.Sprintf(`
 require "json"
 ActiveRecord::Base.logger = nil
@@ -72,20 +73,25 @@ key = ApiKey.create!(
 )
 
 STDOUT.sync = true
-puts key.key
-puts admin.username
+puts "DV_API_KEY:#{key.key}"
+puts "DV_USERNAME:#{admin.username}"
 `, opts.Description)
 
 	cmd := fmt.Sprintf("cd %s && RAILS_ENV=development bundle exec rails runner - <<'RUBY'\n%s\nRUBY",
 		shellQuote(opts.Workdir), rubyScript)
 
-	var key, username string
+	verboseLog("Running command: bash -lc %q", cmd)
+
 	var lastErr error
 
 	for attempt := 1; attempt <= KeyRetryAttempts; attempt++ {
 		verboseLog("Attempt %d/%d...", attempt, KeyRetryAttempts)
 
-		out, err := docker.ExecOutput(opts.ContainerName, opts.Workdir, opts.Envs, []string{"bash", "-lc", cmd})
+		// Reset per attempt to avoid carrying over partial results
+		var key, username string
+
+		out, err := docker.ExecCombinedOutput(opts.ContainerName, opts.Workdir, opts.Envs, []string{"bash", "-lc", cmd})
+		verboseLog("Rails runner output (%d bytes, markers: key=%t, user=%t)", len(out), strings.Contains(out, "DV_API_KEY:"), strings.Contains(out, "DV_USERNAME:"))
 		if err != nil {
 			lastErr = fmt.Errorf("rails runner failed: %w\nOutput: %s", err, out)
 			if attempt < KeyRetryAttempts {
@@ -96,9 +102,20 @@ puts admin.username
 			return nil, lastErr
 		}
 
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		if len(lines) < 2 {
-			lastErr = fmt.Errorf("unexpected rails output: %s", out)
+		// Parse output looking for DV_API_KEY: and DV_USERNAME: markers
+		// This is robust against warnings/noise that plugins may emit during Rails init
+		lines := strings.Split(out, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "DV_API_KEY:") {
+				key = strings.TrimPrefix(line, "DV_API_KEY:")
+			} else if strings.HasPrefix(line, "DV_USERNAME:") {
+				username = strings.TrimPrefix(line, "DV_USERNAME:")
+			}
+		}
+
+		if key == "" || username == "" {
+			lastErr = fmt.Errorf("missing DV_API_KEY or DV_USERNAME markers in output: %q", out)
 			if attempt < KeyRetryAttempts {
 				verboseLog("Failed, retrying in %s: %v", KeyRetryDelay, lastErr)
 				time.Sleep(KeyRetryDelay)
@@ -106,25 +123,11 @@ puts admin.username
 			}
 			return nil, lastErr
 		}
-
-		// Get the last two non-empty lines
-		key = strings.TrimSpace(lines[len(lines)-2])
-		username = strings.TrimSpace(lines[len(lines)-1])
 
 		// Validate key format (should be hex, 32-64 chars)
 		keyRe := regexp.MustCompile(`^[0-9a-f]{32,64}$`)
 		if !keyRe.MatchString(key) {
 			lastErr = fmt.Errorf("invalid API key format: %q", key)
-			if attempt < KeyRetryAttempts {
-				verboseLog("Failed, retrying in %s: %v", KeyRetryDelay, lastErr)
-				time.Sleep(KeyRetryDelay)
-				continue
-			}
-			return nil, lastErr
-		}
-
-		if username == "" {
-			lastErr = fmt.Errorf("empty username returned")
 			if attempt < KeyRetryAttempts {
 				verboseLog("Failed, retrying in %s: %v", KeyRetryDelay, lastErr)
 				time.Sleep(KeyRetryDelay)
