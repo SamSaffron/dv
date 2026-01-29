@@ -269,3 +269,82 @@ func (g *gitSyncer) debugf(format string, args ...interface{}) {
 	}
 	fmt.Fprintf(g.logOut, "[git-sync] "+format+"\n", args...)
 }
+
+// syncFromContainer transfers commits from container to host using git bundles.
+// This is the reverse of syncToContainer and handles cases where the container
+// has commits (e.g., from a rebase) that don't exist in the host repo.
+// Returns nil on success, error on failure. Failure is non-fatal - caller should
+// fall back to existing behavior.
+func syncFromContainer(ctx context.Context, containerName, workdir, localRepo string,
+	containerHead string, logOut io.Writer, debug bool) error {
+
+	debugf := func(format string, args ...interface{}) {
+		if debug {
+			fmt.Fprintf(logOut, "[git-sync] "+format+"\n", args...)
+		}
+	}
+
+	// Find a common ancestor in the container that exists in the host repo.
+	// Try origin/main, origin/master, or origin/HEAD as the base.
+	var baseRef string
+	for _, candidate := range []string{"origin/main", "origin/master", "origin/HEAD"} {
+		// Check if ref exists in container
+		out, err := docker.ExecOutput(containerName, workdir, nil, []string{"git", "rev-parse", "--verify", "--quiet", candidate})
+		if err != nil || strings.TrimSpace(out) == "" {
+			continue
+		}
+		baseSHA := strings.TrimSpace(out)
+		// Check if this commit exists in host repo
+		cmd := exec.CommandContext(ctx, "git", "cat-file", "-e", baseSHA+"^{commit}")
+		cmd.Dir = localRepo
+		if cmd.Run() == nil {
+			baseRef = candidate
+			debugf("found common ancestor: %s (%s)", candidate, baseSHA[:min(8, len(baseSHA))])
+			break
+		}
+	}
+
+	if baseRef == "" {
+		return fmt.Errorf("no common ancestor found between container and host")
+	}
+
+	// Create bundle in container with commits from base to the specific commit we captured
+	// (using containerHead rather than HEAD to avoid drift if container state changes)
+	containerBundle := "/tmp/dv-extract-sync.bundle"
+	bundleArgs := []string{"git", "bundle", "create", containerBundle, "^" + baseRef, containerHead}
+	out, err := docker.ExecOutput(containerName, workdir, nil, bundleArgs)
+	if err != nil {
+		return fmt.Errorf("git bundle create in container: %w: %s", err, out)
+	}
+	debugf("created bundle in container: ^%s %s", baseRef, containerHead[:min(8, len(containerHead))])
+
+	// Copy bundle from container to host temp file
+	tmpFile, err := os.CreateTemp("", "dv-extract-sync-*.bundle")
+	if err != nil {
+		// Clean up container bundle
+		docker.ExecOutput(containerName, "/", nil, []string{"rm", "-f", containerBundle})
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	hostBundle := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(hostBundle)
+
+	if err := docker.CopyFromContainer(containerName, containerBundle, hostBundle); err != nil {
+		docker.ExecOutput(containerName, "/", nil, []string{"rm", "-f", containerBundle})
+		return fmt.Errorf("copying bundle from container: %w", err)
+	}
+
+	// Clean up container bundle
+	docker.ExecOutput(containerName, "/", nil, []string{"rm", "-f", containerBundle})
+
+	// Fetch bundle into host repo
+	fetchCmd := exec.CommandContext(ctx, "git", "fetch", hostBundle)
+	fetchCmd.Dir = localRepo
+	fetchOut, err := fetchCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git fetch from bundle: %w: %s", err, strings.TrimSpace(string(fetchOut)))
+	}
+
+	debugf("fetched commits from container bundle")
+	return nil
+}

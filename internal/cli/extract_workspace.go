@@ -128,33 +128,55 @@ func extractWorkspaceRepo(opts workspaceExtractOptions) error {
 			branchDisplay = "HEAD (detached)"
 		}
 	} else {
-		baseRef := ""
-		if containerBranch != "" && containerBranch != "HEAD" {
-			candidate := "origin/" + containerBranch
-			if refExists(opts.localRepo, candidate) {
-				baseRef = candidate
-			}
-		}
-		if baseRef == "" {
-			switch {
-			case refExists(opts.localRepo, "origin/main"):
-				baseRef = "origin/main"
-			case refExists(opts.localRepo, "origin/master"):
-				baseRef = "origin/master"
-			case refExists(opts.localRepo, "origin/HEAD"):
-				baseRef = "origin/HEAD"
-			}
-		}
-		if baseRef != "" {
-			if err := runInDir(opts.localRepo, procOut, procErr, "git", "checkout", "-B", opts.branchName, baseRef); err != nil {
-				return err
+		// Commit missing - try to fetch from container first (handles rebased commits)
+		ctx := opts.cmd.Context()
+		syncErr := syncFromContainer(ctx, opts.containerName, opts.containerWorkdir, opts.localRepo, commit, logOut, opts.syncDebug)
+		if syncErr == nil && commitExistsInRepo(opts.localRepo, commit) {
+			// Sync succeeded and commit now exists - do normal checkout
+			if containerBranch != "" && containerBranch != "HEAD" {
+				if err := runInDir(opts.localRepo, procOut, procErr, "git", "checkout", "-B", containerBranch, commit); err != nil {
+					return err
+				}
+				branchDisplay = containerBranch
+			} else {
+				if err := runInDir(opts.localRepo, procOut, procErr, "git", "checkout", "--detach", commit); err != nil {
+					return err
+				}
+				branchDisplay = "HEAD (detached)"
 			}
 		} else {
-			if err := runInDir(opts.localRepo, procOut, procErr, "git", "checkout", "-B", opts.branchName); err != nil {
-				return err
+			// Fall back to creating branch from origin - commit doesn't exist in local repo
+			if opts.syncDebug && syncErr != nil {
+				fmt.Fprintf(logOut, "[git-sync] sync from container failed: %v\n", syncErr)
 			}
+			baseRef := ""
+			if containerBranch != "" && containerBranch != "HEAD" {
+				candidate := "origin/" + containerBranch
+				if refExists(opts.localRepo, candidate) {
+					baseRef = candidate
+				}
+			}
+			if baseRef == "" {
+				switch {
+				case refExists(opts.localRepo, "origin/main"):
+					baseRef = "origin/main"
+				case refExists(opts.localRepo, "origin/master"):
+					baseRef = "origin/master"
+				case refExists(opts.localRepo, "origin/HEAD"):
+					baseRef = "origin/HEAD"
+				}
+			}
+			if baseRef != "" {
+				if err := runInDir(opts.localRepo, procOut, procErr, "git", "checkout", "-B", opts.branchName, baseRef); err != nil {
+					return err
+				}
+			} else {
+				if err := runInDir(opts.localRepo, procOut, procErr, "git", "checkout", "-B", opts.branchName); err != nil {
+					return err
+				}
+			}
+			branchDisplay = opts.branchName
 		}
-		branchDisplay = opts.branchName
 	}
 
 	fmt.Fprintf(logOut, "Extracting %s changes from container...\n", opts.displayName)

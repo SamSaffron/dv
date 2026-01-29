@@ -284,3 +284,92 @@ func TestGitSyncer_Min(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncFromContainer_NoCommonAncestor(t *testing.T) {
+	// Test that syncFromContainer fails gracefully when no common ancestor exists
+	// This happens when the local repo has no origin/* refs that exist in the container
+	// This test doesn't require Docker since it fails before any container operations
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	gitInit(t, tmpDir)
+
+	// Create a commit but no remote refs
+	writeFile(t, filepath.Join(tmpDir, "test.txt"), "initial")
+	runGit(t, tmpDir, "add", ".")
+	runGit(t, tmpDir, "commit", "-m", "initial")
+
+	var logBuf bytes.Buffer
+	ctx := context.Background()
+
+	// Call syncFromContainer - it should fail because there's no origin/* refs
+	// The function will try to resolve origin/main, origin/master, origin/HEAD
+	// and fail before attempting any Docker operations
+	err := syncFromContainer(ctx, "fake-container", "/workdir", tmpDir, "abc123", &logBuf, false)
+
+	if err == nil {
+		t.Error("expected error when no common ancestor exists")
+	}
+	if err != nil && !bytes.Contains([]byte(err.Error()), []byte("no common ancestor")) {
+		t.Errorf("expected 'no common ancestor' error, got: %v", err)
+	}
+}
+
+func TestSyncFromContainer_DebugLogging(t *testing.T) {
+	// Test that debug logging works for syncFromContainer
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	gitInit(t, tmpDir)
+
+	writeFile(t, filepath.Join(tmpDir, "test.txt"), "initial")
+	runGit(t, tmpDir, "add", ".")
+	runGit(t, tmpDir, "commit", "-m", "initial")
+
+	var logBuf bytes.Buffer
+	ctx := context.Background()
+
+	// With debug=true, should see logging even in error path
+	_ = syncFromContainer(ctx, "fake-container", "/workdir", tmpDir, "abc123", &logBuf, true)
+
+	// The function won't log anything in the no-common-ancestor path since it
+	// fails before finding any ancestor to log about. This test just validates
+	// the function doesn't panic with debug=true
+}
+
+func TestSyncFromContainer_WithOriginRef(t *testing.T) {
+	// Test syncFromContainer when origin/main exists in host but container doesn't exist
+	// The function first checks if each origin/* ref exists in the container (via Docker),
+	// so when Docker operations fail, we get "no common ancestor" even if the ref exists
+	// locally. This test validates the function handles Docker failures gracefully.
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	gitInit(t, tmpDir)
+
+	// Create a commit
+	writeFile(t, filepath.Join(tmpDir, "test.txt"), "initial")
+	runGit(t, tmpDir, "add", ".")
+	runGit(t, tmpDir, "commit", "-m", "initial")
+
+	// Add an origin/main ref pointing to HEAD
+	runGit(t, tmpDir, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	var logBuf bytes.Buffer
+	ctx := context.Background()
+
+	// Call syncFromContainer - it will fail because Docker operations fail
+	// when trying to check if origin/main exists in the (nonexistent) container
+	err := syncFromContainer(ctx, "fake-container", "/workdir", tmpDir, "abc123", &logBuf, true)
+
+	// Should fail - the Docker call to check for origin/main in container fails
+	if err == nil {
+		t.Error("expected error when container doesn't exist")
+	}
+
+	// The error should indicate no common ancestor (since Docker calls fail before
+	// we can verify the ref exists in both places)
+	if err != nil && !bytes.Contains([]byte(err.Error()), []byte("no common ancestor")) {
+		t.Errorf("expected 'no common ancestor' error, got: %v", err)
+	}
+}

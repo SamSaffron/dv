@@ -240,40 +240,61 @@ Use 'dv extract plugin <name>' or 'dv extract theme <name>' for tab completion.`
 				branchDisplay = "HEAD (detached)"
 			}
 		} else {
-			// Commit is missing in outer repo; create a branch named after the agent
-			// Choose a reasonable base: origin/<containerBranch> if it exists, otherwise origin/main or origin/master
-			baseRef := ""
-			if containerBranch != "" && containerBranch != "HEAD" {
-				candidate := "origin/" + containerBranch
-				if refExists(localRepo, candidate) {
-					baseRef = candidate
-				}
-			}
-			if baseRef == "" {
-				if refExists(localRepo, "origin/main") {
-					baseRef = "origin/main"
-				} else if refExists(localRepo, "origin/master") {
-					baseRef = "origin/master"
-				} else {
-					// Fall back to origin/HEAD if available
-					if refExists(localRepo, "origin/HEAD") {
-						baseRef = "origin/HEAD"
+			// Commit missing - try to fetch from container first (handles rebased commits)
+			ctx := cmd.Context()
+			syncErr := syncFromContainer(ctx, name, work, localRepo, commit, logOut, syncDebug)
+			if syncErr == nil && commitExistsInRepo(localRepo, commit) {
+				// Sync succeeded and commit now exists - do normal checkout
+				if containerBranch != "" && containerBranch != "HEAD" {
+					if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", containerBranch, commit); err != nil {
+						return err
 					}
-				}
-			}
-			// Create or reset the branch named after the agent
-			branchName := name
-			if baseRef != "" {
-				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName, baseRef); err != nil {
-					return err
+					branchDisplay = containerBranch
+				} else {
+					if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "--detach", commit); err != nil {
+						return err
+					}
+					branchDisplay = "HEAD (detached)"
 				}
 			} else {
-				// As a last resort, create the branch at current HEAD
-				if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName); err != nil {
-					return err
+				// Fall back to creating branch from origin - commit doesn't exist in local repo
+				if syncDebug && syncErr != nil {
+					fmt.Fprintf(logOut, "[git-sync] sync from container failed: %v\n", syncErr)
 				}
+				// Choose a reasonable base: origin/<containerBranch> if it exists, otherwise origin/main or origin/master
+				baseRef := ""
+				if containerBranch != "" && containerBranch != "HEAD" {
+					candidate := "origin/" + containerBranch
+					if refExists(localRepo, candidate) {
+						baseRef = candidate
+					}
+				}
+				if baseRef == "" {
+					if refExists(localRepo, "origin/main") {
+						baseRef = "origin/main"
+					} else if refExists(localRepo, "origin/master") {
+						baseRef = "origin/master"
+					} else {
+						// Fall back to origin/HEAD if available
+						if refExists(localRepo, "origin/HEAD") {
+							baseRef = "origin/HEAD"
+						}
+					}
+				}
+				// Create or reset the branch named after the agent
+				branchName := name
+				if baseRef != "" {
+					if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName, baseRef); err != nil {
+						return err
+					}
+				} else {
+					// As a last resort, create the branch at current HEAD
+					if err := runInDir(localRepo, procOut, procErr, "git", "checkout", "-B", branchName); err != nil {
+						return err
+					}
+				}
+				branchDisplay = branchName
 			}
-			branchDisplay = branchName
 		}
 
 		fmt.Fprintln(logOut, "Extracting changes from container...")
