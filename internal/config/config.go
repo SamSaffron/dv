@@ -53,12 +53,13 @@ type CopyFallback struct {
 
 // CopyRule represents a host->container copy mapping with optional agent scoping.
 type CopyRule struct {
-	Host      string        `json:"host"`
-	Container string        `json:"container"`
-	Agents    []string      `json:"agents,omitempty"`
-	CopyKeys  []string      `json:"copyKeys,omitempty"`
-	MergeKey  string        `json:"mergeKey,omitempty"`
-	Fallback  *CopyFallback `json:"fallback,omitempty"`
+	Host          string        `json:"host"`
+	Container     string        `json:"container"`
+	Agents        []string      `json:"agents,omitempty"`
+	CopyKeys      []string      `json:"copyKeys,omitempty"`
+	MergeKey      string        `json:"mergeKey,omitempty"`
+	Fallback      *CopyFallback `json:"fallback,omitempty"`
+	SkipIfPresent bool          `json:"skipIfPresent,omitempty"` // skip copy if destination exists in container
 }
 
 // ImageSource describes how to obtain the Dockerfile for an image.
@@ -262,6 +263,29 @@ func DefaultCopyRules() []CopyRule {
 			Container: "/home/discourse/.claude.json",
 			Agents:    []string{"claude"},
 			CopyKeys:  []string{"oauthAccount", "userID", "hasCompletedOnboarding", "tipsHistory"},
+		},
+		// term-llm config files
+		{
+			Host:      "~/.config/term-llm/config.yaml",
+			Container: "/home/discourse/.config/term-llm/",
+			Agents:    []string{"term-llm"},
+		},
+		{
+			Host:      "~/.config/term-llm/*.json",
+			Container: "/home/discourse/.config/term-llm/",
+			Agents:    []string{"term-llm"},
+		},
+		{
+			Host:          "~/.config/term-llm/agents",
+			Container:     "/home/discourse/.config/term-llm/",
+			Agents:        []string{"term-llm"},
+			SkipIfPresent: true,
+		},
+		{
+			Host:          "~/.config/term-llm/skills",
+			Container:     "/home/discourse/.config/term-llm/",
+			Agents:        []string{"term-llm"},
+			SkipIfPresent: true,
 		},
 	}
 }

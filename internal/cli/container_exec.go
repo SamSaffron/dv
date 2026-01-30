@@ -88,14 +88,22 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 		}
 		hostPaths := expandHostSources(rule.Host)
 
-		// Filter to only existing regular files
-		var validPaths []string
+		// Filter to existing files or directories
+		type pathInfo struct {
+			path  string
+			isDir bool
+		}
+		var validPaths []pathInfo
 		for _, hp := range hostPaths {
 			if hp == "" {
 				continue
 			}
-			if st, err := os.Stat(hp); err == nil && st.Mode().IsRegular() {
-				validPaths = append(validPaths, hp)
+			st, err := os.Stat(hp)
+			if err != nil {
+				continue
+			}
+			if st.Mode().IsRegular() || st.IsDir() {
+				validPaths = append(validPaths, pathInfo{path: hp, isDir: st.IsDir()})
 			}
 		}
 
@@ -103,33 +111,42 @@ func copyConfiguredFiles(cmd *cobra.Command, cfg config.Config, containerName, w
 		if len(validPaths) == 0 && rule.Fallback != nil && rule.Fallback.Type == "command" {
 			tmpPath, err := runFallbackCommand(rule.Fallback.Exec)
 			if err == nil && tmpPath != "" {
-				validPaths = []string{tmpPath}
+				validPaths = []pathInfo{{path: tmpPath, isDir: false}}
 				defer os.Remove(tmpPath)
 			}
 			// Silently skip if fallback also fails
 		}
 
-		for _, hostPath := range validPaths {
-			target := containerPathFor(rule.Container, hostPath)
+		for _, hp := range validPaths {
+			target := containerPathFor(rule.Container, hp.path)
+
+			// Skip if destination already exists in container
+			if rule.SkipIfPresent {
+				out, err := docker.ExecOutput(containerName, workdir, nil, []string{"test", "-e", target})
+				if err == nil && out == "" {
+					continue
+				}
+			}
+
 			dstDir := filepath.Dir(target)
 			_, _ = docker.ExecOutput(containerName, workdir, nil, []string{"bash", "-lc", "mkdir -p " + shellQuote(dstDir)})
 
-			if len(rule.CopyKeys) > 0 && strings.HasSuffix(strings.ToLower(hostPath), ".json") {
-				if err := copyJsonKeys(containerName, hostPath, target, rule.CopyKeys); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy keys from %s to %s: %v\n", hostPath, target, err)
+			if len(rule.CopyKeys) > 0 && strings.HasSuffix(strings.ToLower(hp.path), ".json") {
+				if err := copyJsonKeys(containerName, hp.path, target, rule.CopyKeys); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy keys from %s to %s: %v\n", hp.path, target, err)
 				}
 				continue
 			}
 
-			if rule.MergeKey != "" && strings.HasSuffix(strings.ToLower(hostPath), ".json") {
-				if err := mergeAndCopyJSON(containerName, hostPath, target, rule.MergeKey); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to merge and copy %s to %s: %v\n", hostPath, target, err)
+			if rule.MergeKey != "" && strings.HasSuffix(strings.ToLower(hp.path), ".json") {
+				if err := mergeAndCopyJSON(containerName, hp.path, target, rule.MergeKey); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Failed to merge and copy %s to %s: %v\n", hp.path, target, err)
 				}
 				continue
 			}
 
-			if err := docker.CopyToContainerWithOwnership(containerName, hostPath, target, false); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hostPath, target, err)
+			if err := docker.CopyToContainerWithOwnership(containerName, hp.path, target, hp.isDir); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Failed to copy %s to %s: %v\n", hp.path, target, err)
 				continue
 			}
 		}

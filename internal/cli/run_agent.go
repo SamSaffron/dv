@@ -32,17 +32,12 @@ var runAgentCmd = &cobra.Command{
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// First arg: agent name completion
 		if len(args) == 0 {
-			// Build from known rules
-			var suggestions []string
-			for name := range agentRules {
-				suggestions = append(suggestions, name)
-			}
-			// Filter by prefix
+			// Use precomputed alias map (already deduped)
 			var out []string
 			pref := strings.ToLower(strings.TrimSpace(toComplete))
-			for _, s := range suggestions {
-				if pref == "" || strings.HasPrefix(strings.ToLower(s), pref) {
-					out = append(out, s)
+			for name := range agentAliasMap {
+				if pref == "" || strings.HasPrefix(name, pref) {
+					out = append(out, name)
 				}
 			}
 			return out, cobra.ShellCompDirectiveNoFileComp
@@ -128,15 +123,14 @@ var runAgentCmd = &cobra.Command{
 		}
 		workdir := config.EffectiveWorkdir(cfg, imgCfg, name)
 
-		// Parse args: first token is the agent name
-		agent := args[0]
-		agentLower := strings.ToLower(agent)
+		// Parse args: first token is the agent name (resolve aliases, returns lowercase)
+		agent := resolveAgentAlias(args[0])
 
 		// Copy configured files (auth, etc.) into the container as in `enter`,
 		// but scoped to the requested agent when configured.
-		copyConfiguredFiles(cmd, cfg, name, workdir, agentLower)
+		copyConfiguredFiles(cmd, cfg, name, workdir, agent)
 
-		envs := buildAgentEnv(cfg, agentLower, cmd)
+		envs := buildAgentEnv(cfg, agent, cmd)
 
 		rawArgs := []string{}
 		rest := args[1:]
@@ -325,12 +319,13 @@ func injectDefaults(argv []string, defaults []string) []string {
 	return out
 }
 
-// agentRules defines how to run each supported agent.
+// agentRule defines how to run each supported agent.
 type agentRule struct {
 	interactive func() []string
 	withPrompt  func(prompt string) []string
 	defaults    []string
 	env         []string
+	aliases     []string // alternative names for this agent
 }
 
 var agentRules = map[string]agentRule{
@@ -399,6 +394,45 @@ var agentRules = map[string]agentRule{
 		withPrompt:  func(p string) []string { return []string{"vibe", "--prompt", p} },
 		defaults:    []string{"--auto-approve"},
 	},
+	"term-llm": {
+		interactive: func() []string { return []string{"term-llm"} },
+		withPrompt:  func(p string) []string { return []string{"term-llm", "-p", p} },
+		defaults:    []string{},
+		aliases:     []string{"tl"},
+		env:         []string{"GOOGLE_SEARCH_API_KEY", "GOOGLE_SEARCH_CX", "CEREBRAS_API_KEY"},
+	},
+}
+
+// agentAliasMap maps aliases to canonical agent names (precomputed at init).
+var agentAliasMap map[string]string
+
+func init() {
+	agentAliasMap = make(map[string]string)
+	for canonical, rule := range agentRules {
+		// Map canonical name to itself
+		if existing, ok := agentAliasMap[canonical]; ok {
+			panic("agent name collision: " + canonical + " already mapped to " + existing)
+		}
+		agentAliasMap[canonical] = canonical
+
+		// Map aliases to canonical
+		for _, alias := range rule.aliases {
+			aliasLower := strings.ToLower(alias)
+			if existing, ok := agentAliasMap[aliasLower]; ok {
+				panic("agent alias collision: " + aliasLower + " already mapped to " + existing)
+			}
+			agentAliasMap[aliasLower] = canonical
+		}
+	}
+}
+
+// resolveAgentAlias returns the canonical agent name for a given alias (or the name itself).
+func resolveAgentAlias(name string) string {
+	lower := strings.ToLower(name)
+	if canonical, ok := agentAliasMap[lower]; ok {
+		return canonical
+	}
+	return lower
 }
 
 // shellJoin and shellQuote are now in shared.go

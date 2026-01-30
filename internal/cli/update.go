@@ -74,6 +74,7 @@ var updateAgentsCmd = &cobra.Command{
 			{label: "Cursor Agent", command: "curl -fsS https://cursor.com/install | bash", useUserPaths: true},
 			{label: "Factory Droid", command: "curl -fsSL https://app.factory.ai/cli | sh", useUserPaths: true},
 			{label: "Mistral Vibe", command: "curl -LsSf https://mistral.ai/vibe/install.sh | bash", useUserPaths: true},
+			{label: "Term-LLM", command: "command -v term-llm >/dev/null && term-llm upgrade || echo 'term-llm not installed, skipping'", useUserPaths: true},
 		}
 
 		for _, step := range steps {
