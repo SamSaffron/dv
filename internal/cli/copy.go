@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -124,12 +125,49 @@ func copyHostToContainer(srcOnHost, dstInContainer, containerName string, verbos
 }
 
 func copyContainerToHost(containerName, srcInContainer, dstOnHost string, verbose bool) error {
-	if err := docker.CopyFromContainer(containerName, srcInContainer, dstOnHost); err != nil {
-		return fmt.Errorf("failed to copy %s:%s to %s: %w", containerName, srcInContainer, dstOnHost, err)
+	// Check if source path needs shell expansion (contains glob metacharacters or ~)
+	needsExpansion := docker.ContainsGlobMeta(srcInContainer) || strings.HasPrefix(srcInContainer, "~")
+
+	if !needsExpansion {
+		// Simple case: no glob, copy directly
+		if err := docker.CopyFromContainer(containerName, srcInContainer, dstOnHost); err != nil {
+			return fmt.Errorf("failed to copy %s:%s to %s: %w", containerName, srcInContainer, dstOnHost, err)
+		}
+		if verbose {
+			fmt.Printf("Copied %s:%s → %s\n", containerName, srcInContainer, dstOnHost)
+		}
+		return nil
 	}
 
-	if verbose {
-		fmt.Printf("Copied %s:%s → %s\n", containerName, srcInContainer, dstOnHost)
+	// Expand glob pattern in container
+	paths, err := docker.ExpandGlobInContainer(containerName, srcInContainer)
+	if err != nil {
+		return fmt.Errorf("failed to expand pattern '%s' in container: %w", srcInContainer, err)
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("no files match pattern: %s", srcInContainer)
+	}
+
+	// When copying multiple files, destination must be an existing directory
+	if len(paths) > 1 {
+		st, err := os.Stat(dstOnHost)
+		if err != nil || !st.IsDir() {
+			return fmt.Errorf("destination must be an existing directory when copying multiple files: %s", dstOnHost)
+		}
+	}
+
+	// Copy each matched file
+	for _, path := range paths {
+		if err := docker.CopyFromContainer(containerName, path, dstOnHost); err != nil {
+			return fmt.Errorf("failed to copy %s:%s to %s: %w", containerName, path, dstOnHost, err)
+		}
+		if verbose {
+			fmt.Printf("Copied %s:%s → %s\n", containerName, path, filepath.Join(dstOnHost, filepath.Base(path)))
+		}
+	}
+
+	if !verbose && len(paths) > 0 {
+		fmt.Printf("Copied %d file(s) from %s\n", len(paths), srcInContainer)
 	}
 	return nil
 }

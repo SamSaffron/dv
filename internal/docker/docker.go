@@ -582,6 +582,36 @@ func ExecAsRootCombinedContext(ctx context.Context, name, workdir string, envs E
 	return string(out), err
 }
 
+// ExpandGlobInContainer runs a shell command to expand a glob pattern inside the container.
+// Returns a list of matching paths, or an empty slice if no matches.
+// The pattern can include ~ for the user's home directory and glob metacharacters (* ? [ {).
+func ExpandGlobInContainer(containerName, pattern string) ([]string, error) {
+	// Pass pattern as a positional argument to avoid command injection.
+	// The script expands ~ to $HOME, enables nullglob to handle no-match gracefully,
+	// and outputs one existing file per line.
+	cmd := exec.Command("docker", "exec", containerName, "bash", "-c",
+		`pattern=$1; pattern=${pattern/#\~/$HOME}; shopt -s nullglob; for f in $pattern; do [ -e "$f" ] && echo "$f"; done`,
+		"--", pattern)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var paths []string
+	for _, line := range lines {
+		if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths, nil
+}
+
+// ContainsGlobMeta returns true if the path contains glob metacharacters (* ? [ {).
+// Also detects brace expansion patterns like {a,b}.
+func ContainsGlobMeta(path string) bool {
+	return strings.ContainsAny(path, "*?[{")
+}
+
 func CopyFromContainer(name, srcInContainer, dstOnHost string) error {
 	cmd := exec.Command("docker", "cp", fmt.Sprintf("%s:%s", name, srcInContainer), dstOnHost)
 	if isTruthyEnv("DV_VERBOSE") {

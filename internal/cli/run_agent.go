@@ -396,7 +396,7 @@ var agentRules = map[string]agentRule{
 	},
 	"term-llm": {
 		interactive: func() []string { return []string{"term-llm"} },
-		withPrompt:  func(p string) []string { return []string{"term-llm", "-p", p} },
+		withPrompt:  func(p string) []string { return []string{"term-llm", "ask", "--yolo", p} },
 		defaults:    []string{},
 		aliases:     []string{"tl"},
 		env:         []string{"GOOGLE_SEARCH_API_KEY", "GOOGLE_SEARCH_CX", "CEREBRAS_API_KEY"},
